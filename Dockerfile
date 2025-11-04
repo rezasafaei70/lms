@@ -22,6 +22,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy project
 COPY . /app/
 
+RUN mkdir -p /app/logs
 # Collect static files
 # RUN python manage.py collectstatic --noinput
 
