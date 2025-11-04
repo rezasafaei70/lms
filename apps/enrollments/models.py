@@ -62,6 +62,14 @@ class Enrollment(TimeStampedModel, SoftDeleteModel):
         choices=EnrollmentStatus.choices,
         default=EnrollmentStatus.PENDING
     )
+    invoice = models.OneToOneField(
+        'financial.Invoice',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='class_enrollment',
+        verbose_name=_('فاکتور')
+    )
     
     # Dates
     enrollment_date = models.DateTimeField(_('تاریخ ثبت‌نام'), auto_now_add=True)
@@ -138,18 +146,23 @@ class Enrollment(TimeStampedModel, SoftDeleteModel):
     # Notes
     notes = models.TextField(_('یادداشت‌ها'), null=True, blank=True)
     cancellation_reason = models.TextField(_('دلیل لغو'), null=True, blank=True)
-
+    @property
+    def is_paid(self):
+        if not self.invoice:
+            return False
+        return self.invoice.is_paid
     class Meta:
         db_table = 'enrollments'
         verbose_name = _('ثبت‌نام')
         verbose_name_plural = _('ثبت‌نام‌ها')
         ordering = ['-enrollment_date']
-        unique_together = ['student', 'class_obj']
-        indexes = [
-            models.Index(fields=['enrollment_number']),
-            models.Index(fields=['student', 'status']),
-            models.Index(fields=['class_obj', 'status']),
-            models.Index(fields=['term']),
+        unique_together = ['student', 'class_obj'] # ⚠️ باید این را برای وضعیت‌های لغو شده نادیده گرفت
+        constraints = [
+            models.UniqueConstraint(
+                fields=['student', 'class_obj'],
+                condition=~models.Q(status__in=['cancelled', 'rejected']),
+                name='unique_active_enrollment'
+            )
         ]
 
     def __str__(self):
@@ -559,7 +572,7 @@ class AnnualRegistration(TimeStampedModel):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='annual_registration',
+        related_name='annual_registration_source',
         verbose_name=_('فاکتور')
     )
     

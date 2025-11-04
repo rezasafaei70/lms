@@ -8,6 +8,10 @@ from django.utils import timezone
 from django.db.models import Q, Count, Sum
 from django.db import transaction
 
+from apps.core.models import SystemSettings
+from apps.courses.models import Class
+from apps.financial.models import Invoice, InvoiceItem
+
 from .models import (
     Enrollment, PlacementTest, WaitingList, EnrollmentTransfer,
     AnnualRegistration, EnrollmentDocument
@@ -67,42 +71,73 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='enroll')
     def enroll(self, request):
         """
-        Quick enrollment
+        شروع فرآیند ثبت‌نام معمولی
         POST /api/v1/enrollments/enrollments/enroll/
         {
             "class_obj": "class_id",
-            "discount_code": "CODE123" (optional)
+            "discount_code": "CODE123" // optional
         }
         """
-        data = request.data.copy()
-        data['student'] = request.user.id
+        class_id = request.data.get('class_obj')
+        student = request.user
         
-        # Apply discount code if provided
-        discount_code = data.pop('discount_code', None)
-        discount_amount = 0
-        
-        if discount_code:
-            from apps.financial.models import DiscountCoupon
+        # ... (کد بررسی ظرفیت و ثبت‌نام قبلی)
+        from apps.courses.models import Class
+        with transaction.atomic():
+            # ✅ قفل کردن رکورد کلاس
             try:
-                coupon = DiscountCoupon.objects.get(
-                    code=discount_code,
-                    is_active=True,
-                    valid_from__lte=timezone.now(),
-                    valid_until__gte=timezone.now()
-                )
-                if coupon.can_use(request.user):
-                    discount_amount = coupon.calculate_discount(data['class_obj'])
-                    data['discount_amount'] = discount_amount
-            except DiscountCoupon.DoesNotExist:
-                pass
+                class_obj = Class.objects.select_for_update().get(id=class_id)
+            except Class.DoesNotExist:
+                return Response({'error': 'کلاس یافت نشد'}, status=status.HTTP_404_NOT_FOUND)
+
+            # ✅ دوباره چک کردن ظرفیت داخل تراکنش قفل شده
+            if class_obj.is_full:
+                return Response({'error': 'ظرفیت کلاس در همین لحظه پر شد'}, status=status.HTTP_400_BAD_REQUEST)
+
         
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        enrollment = serializer.save()
+        # ...
         
+        with transaction.atomic():
+            # 1. ایجاد ثبت‌نام با وضعیت در انتظار پرداخت
+            enrollment = Enrollment.objects.create(
+                student=student,
+                class_obj=class_obj,
+                status=Enrollment.EnrollmentStatus.PENDING_PAYMENT,
+                total_amount=class_obj.price, # قیمت پایه
+                # سایر فیلدها...
+            )
+            
+            # 2. ایجاد فاکتور
+            # ... (کد تخفیف و محاسبه قیمت نهایی)
+            
+            invoice = Invoice.objects.create(
+                student=student,
+                branch=class_obj.branch,
+                invoice_type=Invoice.InvoiceType.TUITION,
+                subtotal=class_obj.price,
+                # discount_amount=discount_amount,
+                issue_date=timezone.now().date(),
+                due_date=timezone.now().date() + timezone.timedelta(days=1),
+                created_by=request.user,
+                description=f'شهریه کلاس {class_obj.name}'
+            )
+            
+            InvoiceItem.objects.create(
+                invoice=invoice,
+                description=f'شهریه کلاس {class_obj.name}',
+                quantity=1,
+                unit_price=class_obj.price,
+            )
+            
+            # 3. اتصال فاکتور به ثبت‌نام
+            enrollment.invoice = invoice
+            enrollment.save()
+            
         return Response({
-            'message': 'ثبت‌نام با موفقیت انجام شد',
-            'enrollment': EnrollmentSerializer(enrollment).data
+            'message': 'ثبت‌نام اولیه انجام شد. لطفاً فاکتور را پرداخت کنید.',
+            'enrollment_id': str(enrollment.id),
+            'invoice_id': str(invoice.id),
+            'payment_url': f'/api/v1/financial/invoices/{invoice.id}/pay/'
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='approve')
@@ -157,34 +192,38 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='cancel')
     def cancel(self, request, pk=None):
         """
-        Cancel enrollment
-        POST /api/v1/enrollments/enrollments/{id}/cancel/
-        {
-            "reason": "دلیل لغو"
-        }
+        لغو ثبت‌نام
         """
         enrollment = self.get_object()
-        reason = request.data.get('reason', '')
+        reason = request.data.get('reason', 'لغو توسط کاربر')
         
-        # Check if user can cancel
-        if request.user != enrollment.student and not request.user.is_superuser:
-            return Response({
-                'error': 'شما مجاز به لغو این ثبت‌نام نیستید'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
-        enrollment.status = Enrollment.EnrollmentStatus.CANCELLED
-        enrollment.cancellation_reason = reason
-        enrollment.save()
-        
-        # Decrement class enrollments
-        enrollment.class_obj.current_enrollments -= 1
-        enrollment.class_obj.save()
-        
-        # Refund logic (بعداً با financial کامل می‌شود)
-        
-        return Response({
-            'message': 'ثبت‌نام لغو شد'
-        })
+        # فقط ثبت‌نام‌های فعال یا در انتظار قابل لغو هستند
+        if enrollment.status not in [
+            Enrollment.EnrollmentStatus.ACTIVE,
+            Enrollment.EnrollmentStatus.PENDING_PAYMENT
+        ]:
+            return Response({'error': 'این ثبت‌نام قابل لغو نیست'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # اگر ثبت‌نام فعال بود، شمارنده را کم کن
+            if enrollment.status == Enrollment.EnrollmentStatus.ACTIVE:
+                Class.objects.filter(id=enrollment.class_obj.id).update(
+                    current_enrollments=F('current_enrollments') - 1
+                )
+
+            # بروزرسانی وضعیت
+            enrollment.status = Enrollment.EnrollmentStatus.CANCELLED
+            enrollment.cancellation_reason = reason
+            enrollment.save()
+            
+            # ✅ اطلاع به لیست انتظار
+            from .tasks import check_waiting_list
+            check_waiting_list.delay(enrollment.class_obj.id)
+            
+            # ⚠️ فرآیند بازگشت وجه باید اینجا شروع شود
+            # می‌توانید یک Transaction یا CreditNote در سیستم مالی ایجاد کنید
+            
+        return Response({'message': 'ثبت‌نام با موفقیت لغو شد'})
 
     @action(detail=True, methods=['post'], url_path='withdraw')
     def withdraw(self, request, pk=None):
@@ -473,35 +512,83 @@ class EnrollmentTransferViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='approve')
     def approve(self, request, pk=None):
         """
-        Approve transfer
-        POST /api/v1/enrollments/transfers/{id}/approve/
+        تایید انتقال - مرحله اول: بررسی مالی
         """
         transfer = self.get_object()
         
+        # محاسبه اختلاف قیمت
+        price_difference = transfer.to_class.price - transfer.from_class.price
+        transfer.price_difference = price_difference
+        
+        with db_transaction.atomic():
+            if price_difference > 0:
+                # ✅ باید مابه‌التفاوت پرداخت شود
+                invoice = Invoice.objects.create(
+                    student=transfer.enrollment.student,
+                    branch=transfer.to_class.branch,
+                    invoice_type=Invoice.InvoiceType.OTHER,
+                    subtotal=price_difference,
+                    issue_date=timezone.now().date(),
+                    due_date=timezone.now().date() + timezone.timedelta(days=3),
+                    created_by=request.user,
+                    description=f'مابه‌التفاوت انتقال از کلاس {transfer.from_class.name} به {transfer.to_class.name}'
+                )
+                
+                transfer.status = 'pending_payment'  # وضعیت جدید برای مدل Transfer
+                transfer.save()
+                
+                return Response({
+                    'message': 'انتقال تایید شد. لطفاً مابه‌التفاوت را پرداخت کنید.',
+                    'invoice_id': str(invoice.id),
+                    'amount_to_pay': price_difference
+                })
+            
+            elif price_difference < 0:
+                # ✅ باید مبلغی بازگردانده شود
+                from apps.financial.models import Transaction
+                Transaction.objects.create(
+                    branch=transfer.from_class.branch,
+                    transaction_type=Transaction.TransactionType.EXPENSE,
+                    category=Transaction.TransactionCategory.OTHER,
+                    amount=abs(price_difference),
+                    date=timezone.now().date(),
+                    description=f'بازگشت وجه انتقال {transfer.enrollment.student.get_full_name()}',
+                    created_by=request.user
+                )
+                self._complete_transfer(transfer, request.user)
+                
+                return Response({
+                    'message': 'انتقال با موفقیت انجام شد و مبلغ اضافه بازگردانده شد.'
+                })
+            
+            else:
+                # ✅ بدون اختلاف قیمت
+                self._complete_transfer(transfer, request.user)
+                
+                return Response({
+                    'message': 'انتقال با موفقیت انجام شد.'
+                })
+    def _complete_transfer(self, transfer, user):
+        """متد کمکی برای نهایی کردن انتقال"""
         with transaction.atomic():
-            # Update enrollment
+            # بروزرسانی ثبت‌نام
             enrollment = transfer.enrollment
+            old_class = enrollment.class_obj
             enrollment.class_obj = transfer.to_class
-            enrollment.total_amount = transfer.to_class.price
             enrollment.save()
             
-            # Update class enrollments
-            transfer.from_class.current_enrollments -= 1
-            transfer.from_class.save()
+            # بروزرسانی شمارنده‌ها
+            old_class.current_enrollments = F('current_enrollments') - 1
+            old_class.save()
             
-            transfer.to_class.current_enrollments += 1
+            transfer.to_class.current_enrollments = F('current_enrollments') + 1
             transfer.to_class.save()
             
-            # Update transfer
-            transfer.status = EnrollmentTransfer.TransferStatus.APPROVED
-            transfer.approved_by = request.user
+            # بروزرسانی انتقال
+            transfer.status = EnrollmentTransfer.TransferStatus.COMPLETED
+            transfer.approved_by = user
             transfer.approved_date = timezone.now()
             transfer.save()
-        
-        return Response({
-            'message': 'انتقال تایید شد'
-        })
-
     @action(detail=True, methods=['post'], url_path='reject')
     def reject(self, request, pk=None):
         """

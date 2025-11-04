@@ -6,7 +6,7 @@ from .models import (
     Installment, Transaction, TeacherPayment
 )
 from apps.accounts.serializers import UserSerializer
-from apps.enrollments.serializers import EnrollmentListSerializer
+from apps.enrollments.serializers import AnnualRegistrationSerializer, EnrollmentListSerializer
 
 
 class InvoiceItemSerializer(serializers.ModelSerializer):
@@ -24,7 +24,14 @@ class InvoiceSerializer(serializers.ModelSerializer):
     Invoice Serializer
     """
     student_details = UserSerializer(source='student', read_only=True)
-    enrollment_details = EnrollmentListSerializer(source='enrollment', read_only=True)
+    class_enrollment_details = EnrollmentListSerializer(
+        source='class_enrollment', 
+        read_only=True
+    )
+    annual_registration_details = AnnualRegistrationSerializer(
+        source='annual_registration_source', 
+        read_only=True
+    )
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     
     items = InvoiceItemSerializer(many=True, read_only=True)

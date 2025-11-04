@@ -3,8 +3,8 @@ from .models import (
     Invoice, InvoiceItem, Payment, DiscountCoupon, CouponUsage,
     Installment, Transaction, TeacherPayment
 )
-
-
+from django.urls import reverse
+from django.utils.html import format_html
 class InvoiceItemInline(admin.TabularInline):
     model = InvoiceItem
     extra = 1
@@ -14,7 +14,7 @@ class InvoiceItemInline(admin.TabularInline):
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
     list_display = [
-        'invoice_number', 'student', 'branch', 'invoice_type',
+        'invoice_number', 'student', 'branch', 'invoice_type','get_related_source',
         'total_amount', 'paid_amount', 'status', 'issue_date', 'is_paid'
     ]
     list_filter = ['invoice_type', 'status', 'issue_date', 'branch']
@@ -44,7 +44,28 @@ class InvoiceAdmin(admin.ModelAdmin):
         }),
     )
 
-
+    @admin.display(description='مربوط به')
+    def get_related_source(self, obj):
+        """
+        نمایش لینک به ثبت‌نام کلاس یا سالانه
+        """
+        if hasattr(obj, 'class_enrollment') and obj.class_enrollment:
+            enrollment = obj.class_enrollment
+            url = reverse(
+                'admin:enrollments_enrollment_change',
+                args=[enrollment.pk]
+            )
+            return format_html(f'<a href="{url}">ثبت‌نام کلاس: {enrollment.enrollment_number}</a>')
+        
+        elif hasattr(obj, 'annual_registration_source') and obj.annual_registration_source:
+            registration = obj.annual_registration_source
+            url = reverse(
+                'admin:enrollments_annualregistration_change',
+                args=[registration.pk]
+            )
+            return format_html(f'<a href="{url}">ثبت‌نام سالانه: {registration.academic_year}</a>')
+            
+        return "-"
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     list_display = [
