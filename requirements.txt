@@ -1,0 +1,59 @@
+# Core
+Django==4.2.7
+djangorestframework==3.14.0
+python-decouple==3.8
+
+# Database
+# psycopg2-binary==2.9.9
+dj-database-url==2.1.0
+
+# Authentication & Security
+djangorestframework-simplejwt==5.3.0
+django-cors-headers==4.3.0
+cryptography==41.0.7
+
+# Caching & Queue
+redis==5.0.1
+django-redis==5.4.0
+celery==5.3.4
+
+# File Storage
+django-storages==1.14.2
+boto3==1.29.7
+# Pillow==10.1.0
+
+# SMS & Notifications
+kavenegar==1.1.2
+
+# Payment
+zeep==4.2.1
+
+# BigBlueButton
+bigbluebutton-api-python==0.0.10
+
+# Utils
+python-dateutil==2.8.2
+jdatetime==4.1.1
+django-filter==23.5
+django-import-export==3.3.5
+openpyxl==3.1.2
+reportlab==4.0.7
+
+# Monitoring & Logging
+sentry-sdk==1.38.0
+
+# Development
+django-debug-toolbar==4.2.0
+django-extensions==3.2.3
+faker==20.1.0
+
+# Testing
+pytest==7.4.3
+pytest-django==4.7.0
+factory-boy==3.3.0
+coverage==7.3.2
+
+# Code Quality
+black==23.11.0
+flake8==6.1.0
+isort==5.12.0

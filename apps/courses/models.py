@@ -1,0 +1,558 @@
+from django.db import models
+from django.utils.translation import gettext_lazy as _
+from django.core.validators import MinValueValidator, MaxValueValidator
+from apps.core.models import TimeStampedModel, SoftDeleteModel
+from apps.accounts.models import User
+from apps.branches.models import Branch, Classroom
+import uuid
+
+
+class Course(TimeStampedModel, SoftDeleteModel):
+    """
+    Course Model
+    """
+    class CourseLevel(models.TextChoices):
+        BEGINNER = 'beginner', _('مبتدی')
+        ELEMENTARY = 'elementary', _('ابتدایی')
+        PRE_INTERMEDIATE = 'pre_intermediate', _('پیش متوسط')
+        INTERMEDIATE = 'intermediate', _('متوسط')
+        UPPER_INTERMEDIATE = 'upper_intermediate', _('فوق متوسط')
+        ADVANCED = 'advanced', _('پیشرفته')
+        PROFICIENCY = 'proficiency', _('تخصصی')
+
+    class CourseStatus(models.TextChoices):
+        ACTIVE = 'active', _('فعال')
+        INACTIVE = 'inactive', _('غیرفعال')
+        DRAFT = 'draft', _('پیش‌نویس')
+        ARCHIVED = 'archived', _('بایگانی شده')
+
+    name = models.CharField(_('نام دوره'), max_length=200)
+    code = models.CharField(_('کد دوره'), max_length=50, unique=True)
+    slug = models.SlugField(_('اسلاگ'), unique=True, allow_unicode=True)
+    
+    # Description
+    description = models.TextField(_('توضیحات'))
+    short_description = models.CharField(_('توضیحات کوتاه'), max_length=500)
+    
+    # Level
+    level = models.CharField(
+        _('سطح'),
+        max_length=20,
+        choices=CourseLevel.choices,
+        default=CourseLevel.BEGINNER
+    )
+    
+    # Prerequisites
+    prerequisites = models.ManyToManyField(
+        'self',
+        blank=True,
+        symmetrical=False,
+        related_name='prerequisite_for',
+        verbose_name=_('پیش نیازها')
+    )
+    
+    # Duration
+    duration_hours = models.PositiveIntegerField(
+        _('مدت دوره (ساعت)'),
+        validators=[MinValueValidator(1)]
+    )
+    sessions_count = models.PositiveIntegerField(
+        _('تعداد جلسات'),
+        validators=[MinValueValidator(1)]
+    )
+    
+    # Syllabus
+    syllabus = models.TextField(_('سرفصل‌ها'), help_text='سرفصل‌های دوره')
+    learning_outcomes = models.TextField(
+        _('اهداف یادگیری'),
+        help_text='چه چیزهایی یاد می‌گیرند'
+    )
+    
+    # Pricing
+    base_price = models.DecimalField(
+        _('قیمت پایه'),
+        max_digits=12,
+        decimal_places=0,
+        validators=[MinValueValidator(0)]
+    )
+    
+    # Materials
+    required_materials = models.TextField(
+        _('مواد و کتب مورد نیاز'),
+        null=True,
+        blank=True
+    )
+    
+    # Media
+    thumbnail = models.ImageField(
+        _('تصویر شاخص'),
+        upload_to='courses/thumbnails/',
+        null=True,
+        blank=True
+    )
+    video_intro = models.FileField(
+        _('ویدیو معرفی'),
+        upload_to='courses/videos/',
+        null=True,
+        blank=True
+    )
+    
+    # Status
+    status = models.CharField(
+        _('وضعیت'),
+        max_length=20,
+        choices=CourseStatus.choices,
+        default=CourseStatus.DRAFT
+    )
+    is_featured = models.BooleanField(_('دوره ویژه'), default=False)
+    
+    # Certificate
+    provides_certificate = models.BooleanField(_('دارای گواهینامه'), default=True)
+    certificate_template = models.FileField(
+        _('قالب گواهینامه'),
+        upload_to='courses/certificates/',
+        null=True,
+        blank=True
+    )
+    
+    # Capacity
+    min_students = models.PositiveIntegerField(
+        _('حداقل دانش‌آموز'),
+        default=5,
+        validators=[MinValueValidator(1)]
+    )
+    max_students = models.PositiveIntegerField(
+        _('حداکثر دانش‌آموز'),
+        default=20,
+        validators=[MinValueValidator(1)]
+    )
+    
+    # SEO
+    meta_description = models.CharField(
+        _('توضیحات متا'),
+        max_length=160,
+        null=True,
+        blank=True
+    )
+    meta_keywords = models.CharField(
+        _('کلمات کلیدی'),
+        max_length=255,
+        null=True,
+        blank=True
+    )
+    
+    # Statistics
+    total_enrollments = models.PositiveIntegerField(_('تعداد ثبت‌نام'), default=0)
+    average_rating = models.DecimalField(
+        _('میانگین امتیاز'),
+        max_digits=3,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(5)]
+    )
+    total_reviews = models.PositiveIntegerField(_('تعداد نظرات'), default=0)
+
+    class Meta:
+        db_table = 'courses'
+        verbose_name = _('دوره')
+        verbose_name_plural = _('دوره‌ها')
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['slug']),
+            models.Index(fields=['level']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.get_level_display()})"
+
+    @property
+    def is_active(self):
+        return self.status == self.CourseStatus.ACTIVE
+
+
+class Class(TimeStampedModel, SoftDeleteModel):
+    """
+    Class Session Model
+    """
+    class ClassType(models.TextChoices):
+        IN_PERSON = 'in_person', _('حضوری')
+        ONLINE = 'online', _('آنلاین')
+        HYBRID = 'hybrid', _('ترکیبی')
+        PRIVATE = 'private', _('خصوصی')
+        SEMI_PRIVATE = 'semi_private', _('نیمه خصوصی')
+
+    class ClassStatus(models.TextChoices):
+        SCHEDULED = 'scheduled', _('برنامه‌ریزی شده')
+        ONGOING = 'ongoing', _('در حال برگزاری')
+        COMPLETED = 'completed', _('تمام شده')
+        CANCELLED = 'cancelled', _('لغو شده')
+        POSTPONED = 'postponed', _('به تعویق افتاده')
+
+    class WeekDay(models.TextChoices):
+        SATURDAY = 'saturday', _('شنبه')
+        SUNDAY = 'sunday', _('یکشنبه')
+        MONDAY = 'monday', _('دوشنبه')
+        TUESDAY = 'tuesday', _('سه‌شنبه')
+        WEDNESDAY = 'wednesday', _('چهارشنبه')
+        THURSDAY = 'thursday', _('پنجشنبه')
+        FRIDAY = 'friday', _('جمعه')
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.PROTECT,
+        related_name='classes',
+        verbose_name=_('دوره')
+    )
+    
+    branch = models.ForeignKey(
+        Branch,
+        on_delete=models.PROTECT,
+        related_name='classes',
+        verbose_name=_('شعبه')
+    )
+    
+    classroom = models.ForeignKey(
+        Classroom,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='classes',
+        verbose_name=_('کلاس فیزیکی')
+    )
+    
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='teaching_classes',
+        verbose_name=_('معلم'),
+        limit_choices_to={'role': User.UserRole.TEACHER}
+    )
+    
+    # Basic Info
+    name = models.CharField(_('نام کلاس'), max_length=200)
+    code = models.CharField(_('کد کلاس'), max_length=50, unique=True)
+    
+    # Type
+    class_type = models.CharField(
+        _('نوع کلاس'),
+        max_length=20,
+        choices=ClassType.choices,
+        default=ClassType.IN_PERSON
+    )
+    
+    # Schedule
+    start_date = models.DateField(_('تاریخ شروع'))
+    end_date = models.DateField(_('تاریخ پایان'))
+    
+    # Weekly schedule (for recurring classes)
+    schedule_days = models.JSONField(
+        _('روزهای برگزاری'),
+        default=list,
+        help_text='لیست روزهای هفته: ["saturday", "monday"]'
+    )
+    start_time = models.TimeField(_('ساعت شروع'))
+    end_time = models.TimeField(_('ساعت پایان'))
+    
+    # Capacity
+    capacity = models.PositiveIntegerField(
+        _('ظرفیت'),
+        validators=[MinValueValidator(1)]
+    )
+    current_enrollments = models.PositiveIntegerField(_('ثبت‌نام‌های فعلی'), default=0)
+    
+    # Pricing
+    price = models.DecimalField(
+        _('شهریه'),
+        max_digits=12,
+        decimal_places=0,
+        validators=[MinValueValidator(0)]
+    )
+    
+    # Online Class Settings
+    bbb_meeting_id = models.CharField(
+        _('شناسه جلسه BBB'),
+        max_length=255,
+        null=True,
+        blank=True
+    )
+    bbb_moderator_password = models.CharField(
+        _('رمز مدیر BBB'),
+        max_length=255,
+        null=True,
+        blank=True
+    )
+    bbb_attendee_password = models.CharField(
+        _('رمز شرکت‌کننده BBB'),
+        max_length=255,
+        null=True,
+        blank=True
+    )
+    
+    # Status
+    status = models.CharField(
+        _('وضعیت'),
+        max_length=20,
+        choices=ClassStatus.choices,
+        default=ClassStatus.SCHEDULED
+    )
+    
+    # Registration
+    registration_start = models.DateTimeField(_('شروع ثبت‌نام'))
+    registration_end = models.DateTimeField(_('پایان ثبت‌نام'))
+    is_registration_open = models.BooleanField(_('ثبت‌نام باز است'), default=True)
+    
+    # Notes
+    description = models.TextField(_('توضیحات'), null=True, blank=True)
+    teacher_notes = models.TextField(_('یادداشت معلم'), null=True, blank=True)
+
+    class Meta:
+        db_table = 'classes'
+        verbose_name = _('کلاس')
+        verbose_name_plural = _('کلاس‌ها')
+        ordering = ['-start_date', 'start_time']
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['course', 'branch']),
+            models.Index(fields=['teacher']),
+            models.Index(fields=['start_date', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} - {self.teacher.get_full_name()}"
+
+    @property
+    def is_full(self):
+        return self.current_enrollments >= self.capacity
+
+    @property
+    def available_seats(self):
+        return self.capacity - self.current_enrollments
+
+    @property
+    def is_online(self):
+        return self.class_type in [self.ClassType.ONLINE, self.ClassType.HYBRID]
+
+    def save(self, *args, **kwargs):
+        # Generate code if not exists
+        if not self.code:
+            import random
+            year = self.start_date.year if self.start_date else 2024
+            self.code = f"CLS{year}{random.randint(1000, 9999)}"
+        
+        # Create BBB meeting for online classes
+        if self.is_online and not self.bbb_meeting_id:
+            self._create_bbb_meeting()
+        
+        super().save(*args, **kwargs)
+
+    def _create_bbb_meeting(self):
+        """Create BigBlueButton meeting"""
+        import secrets
+        self.bbb_meeting_id = f"{self.code}_{uuid.uuid4().hex[:8]}"
+        self.bbb_moderator_password = secrets.token_urlsafe(16)
+        self.bbb_attendee_password = secrets.token_urlsafe(16)
+
+
+class ClassSession(TimeStampedModel):
+    """
+    Individual Class Session (جلسه)
+    """
+    class SessionStatus(models.TextChoices):
+        SCHEDULED = 'scheduled', _('برنامه‌ریزی شده')
+        IN_PROGRESS = 'in_progress', _('در حال برگزاری')
+        COMPLETED = 'completed', _('تمام شده')
+        CANCELLED = 'cancelled', _('لغو شده')
+        RESCHEDULED = 'rescheduled', _('تغییر زمان')
+
+    class_obj = models.ForeignKey(
+        Class,
+        on_delete=models.CASCADE,
+        related_name='sessions',
+        verbose_name=_('کلاس')
+    )
+    
+    session_number = models.PositiveIntegerField(_('شماره جلسه'))
+    title = models.CharField(_('عنوان جلسه'), max_length=200)
+    
+    # Schedule
+    date = models.DateField(_('تاریخ'))
+    start_time = models.TimeField(_('ساعت شروع'))
+    end_time = models.TimeField(_('ساعت پایان'))
+    
+    # Content
+    description = models.TextField(_('توضیحات'), null=True, blank=True)
+    topics = models.TextField(_('موضوعات'), null=True, blank=True)
+    
+    # حذف این فیلد - استفاده از related_name از CourseMaterial
+    # materials = models.FileField(...)  # این خط را حذف کنید
+    
+    # Online Session
+    bbb_recording_url = models.URLField(
+        _('لینک ضبط'),
+        null=True,
+        blank=True
+    )
+    bbb_started_at = models.DateTimeField(_('شروع جلسه آنلاین'), null=True, blank=True)
+    bbb_ended_at = models.DateTimeField(_('پایان جلسه آنلاین'), null=True, blank=True)
+    
+    # Status
+    status = models.CharField(
+        _('وضعیت'),
+        max_length=20,
+        choices=SessionStatus.choices,
+        default=SessionStatus.SCHEDULED
+    )
+    
+    # Attendance
+    attendance_taken = models.BooleanField(_('حضور گرفته شده'), default=False)
+    
+    # Notes
+    teacher_notes = models.TextField(_('یادداشت معلم'), null=True, blank=True)
+
+    class Meta:
+        db_table = 'class_sessions'
+        verbose_name = _('جلسه کلاس')
+        verbose_name_plural = _('جلسات کلاس')
+        ordering = ['date', 'start_time']
+        unique_together = ['class_obj', 'session_number']
+        indexes = [
+            models.Index(fields=['class_obj', 'date']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f"{self.class_obj.name} - جلسه {self.session_number}"
+class Term(TimeStampedModel):
+    """
+    Academic Term Model
+    """
+    class TermStatus(models.TextChoices):
+        UPCOMING = 'upcoming', _('آینده')
+        ACTIVE = 'active', _('فعال')
+        COMPLETED = 'completed', _('تمام شده')
+
+    name = models.CharField(_('نام ترم'), max_length=100)
+    code = models.CharField(_('کد ترم'), max_length=20, unique=True)
+    
+    # Dates
+    start_date = models.DateField(_('تاریخ شروع'))
+    end_date = models.DateField(_('تاریخ پایان'))
+    
+    # Registration Period
+    registration_start = models.DateField(_('شروع ثبت‌نام'))
+    registration_end = models.DateField(_('پایان ثبت‌نام'))
+    
+    # Status
+    status = models.CharField(
+        _('وضعیت'),
+        max_length=20,
+        choices=TermStatus.choices,
+        default=TermStatus.UPCOMING
+    )
+    
+    # Discounts
+    early_registration_discount = models.DecimalField(
+        _('تخفیف ثبت‌نام زودهنگام'),
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text='درصد'
+    )
+    early_registration_deadline = models.DateField(
+        _('مهلت ثبت‌نام زودهنگام'),
+        null=True,
+        blank=True
+    )
+    
+    # Description
+    description = models.TextField(_('توضیحات'), null=True, blank=True)
+
+    class Meta:
+        db_table = 'terms'
+        verbose_name = _('ترم')
+        verbose_name_plural = _('ترم‌ها')
+        ordering = ['-start_date']
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class TeacherReview(TimeStampedModel):
+    """
+    Teacher Review and Rating
+    """
+    teacher = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='reviews',
+        verbose_name=_('معلم'),
+        limit_choices_to={'role': User.UserRole.TEACHER}
+    )
+    student = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='given_reviews',
+        verbose_name=_('دانش‌آموز'),
+        limit_choices_to={'role': User.UserRole.STUDENT}
+    )
+    class_obj = models.ForeignKey(
+        Class,
+        on_delete=models.CASCADE,
+        related_name='reviews',
+        verbose_name=_('کلاس')
+    )
+    
+    # Rating (1-5)
+    rating = models.PositiveSmallIntegerField(
+        _('امتیاز'),
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+    
+    # Review
+    title = models.CharField(_('عنوان'), max_length=200, null=True, blank=True)
+    comment = models.TextField(_('نظر'))
+    
+    # Approval
+    is_approved = models.BooleanField(_('تایید شده'), default=False)
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_reviews',
+        verbose_name=_('تایید کننده')
+    )
+    approved_at = models.DateTimeField(_('تاریخ تایید'), null=True, blank=True)
+
+    class Meta:
+        db_table = 'teacher_reviews'
+        verbose_name = _('نظر معلم')
+        verbose_name_plural = _('نظرات معلمان')
+        ordering = ['-created_at']
+        unique_together = ['teacher', 'student', 'class_obj']
+        indexes = [
+            models.Index(fields=['teacher', 'is_approved']),
+        ]
+
+    def __str__(self):
+        return f"نظر {self.student.get_full_name()} برای {self.teacher.get_full_name()}"
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        
+        # Update teacher rating
+        if is_new or self.is_approved:
+            from apps.accounts.models import TeacherProfile
+            try:
+                profile = TeacherProfile.objects.get(user=self.teacher)
+                profile.update_rating()
+            except TeacherProfile.DoesNotExist:
+                pass
