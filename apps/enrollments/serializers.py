@@ -235,26 +235,38 @@ class AnnualRegistrationSerializer(serializers.ModelSerializer):
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     
+    # Properties از مدل
+    is_paid = serializers.BooleanField(read_only=True)
+    is_active_now = serializers.BooleanField(read_only=True)
+    payment_status = serializers.CharField(read_only=True)
+    total_amount = serializers.DecimalField(max_digits=12, decimal_places=0, read_only=True)
+    paid_amount = serializers.DecimalField(max_digits=12, decimal_places=0, read_only=True)
+    remaining_amount = serializers.DecimalField(max_digits=12, decimal_places=0, read_only=True)
+    days_until_expiry = serializers.IntegerField(read_only=True)
+    can_activate = serializers.BooleanField(read_only=True)
+    
+    # اطلاعات Invoice
+    invoice_id = serializers.UUIDField(source='invoice.id', read_only=True)
+    
     class Meta:
         model = AnnualRegistration
-        fields = '__all__'
-        read_only_fields = ['id', 'created_at', 'updated_at']
-
-    def validate(self, attrs):
-        student = attrs.get('student', self.context.get('request').user)
-        academic_year = attrs.get('academic_year')
-        
-        # Check if already registered for this year
-        if AnnualRegistration.objects.filter(
-            student=student,
-            academic_year=academic_year,
-            status__in=[
-                AnnualRegistration.RegistrationStatus.ACTIVE,
-                AnnualRegistration.RegistrationStatus.PENDING
-            ]
-        ).exists():
-            raise serializers.ValidationError(
-                f'شما قبلاً برای سال تحصیلی {academic_year} ثبت‌نام کرده‌اید'
-            )
-        
-        return attrs
+        fields = [
+            'id', 'student', 'student_details', 'branch', 'branch_name',
+            'academic_year', 'registration_date', 'start_date', 'end_date',
+            'status', 'status_display',
+            'invoice', 'invoice_id',
+            'is_paid', 'is_paid_cached', 'payment_status',
+            'total_amount', 'paid_amount', 'remaining_amount',
+            'registration_fee_amount',
+            'documents_submitted', 'documents_submitted_at',
+            'documents_verified', 'verified_by', 'verified_at',
+            'activated_by', 'activated_at',
+            'is_active_now', 'days_until_expiry', 'can_activate',
+            'notes', 'cancellation_reason',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'created_at', 'updated_at', 'registration_date',
+            'invoice', 'is_paid_cached', 'verified_by', 'verified_at',
+            'activated_by', 'activated_at'
+        ]

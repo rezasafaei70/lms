@@ -556,3 +556,318 @@ class TeacherReview(TimeStampedModel):
                 profile.update_rating()
             except TeacherProfile.DoesNotExist:
                 pass
+            
+class PrivateClassRequest(TimeStampedModel, SoftDeleteModel):
+    """
+    Private/Semi-Private Class Request Model
+    جابجا شده از enrollments به courses
+    """
+    class RequestStatus(models.TextChoices):
+        PENDING = 'pending', _('در انتظار')
+        APPROVED = 'approved', _('تایید شده')
+        REJECTED = 'rejected', _('رد شده')
+        SCHEDULED = 'scheduled', _('زمان‌بندی شده')
+        ACTIVE = 'active', _('فعال')
+        COMPLETED = 'completed', _('تکمیل شده')
+        CANCELLED = 'cancelled', _('لغو شده')
+
+    class ClassType(models.TextChoices):
+        PRIVATE = 'private', _('خصوصی (1 نفر)')
+        SEMI_PRIVATE_2 = 'semi_private_2', _('نیمه خصوصی (2 نفر)')
+        SEMI_PRIVATE_3 = 'semi_private_3', _('نیمه خصوصی (3 نفر)')
+        SEMI_PRIVATE_4 = 'semi_private_4', _('نیمه خصوصی (4-5 نفر)')
+
+    # Request Info
+    request_number = models.CharField(
+        _('شماره درخواست'),
+        max_length=50,
+        unique=True,
+        editable=False
+    )
+    
+    # Student(s)
+    primary_student = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='private_class_requests',
+        verbose_name=_('دانش‌آموز اصلی'),
+        limit_choices_to={'role': User.UserRole.STUDENT}
+    )
+    
+    additional_students = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name='additional_private_classes',
+        verbose_name=_('دانش‌آموزان اضافی'),
+        limit_choices_to={'role': User.UserRole.STUDENT}
+    )
+    
+    # Course & Branch
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name='private_requests',
+        verbose_name=_('دوره')
+    )
+    
+    branch = models.ForeignKey(
+        'branches.Branch',
+        on_delete=models.CASCADE,
+        related_name='private_requests',
+        verbose_name=_('شعبه')
+    )
+    
+    # Class Type
+    class_type = models.CharField(
+        _('نوع کلاس'),
+        max_length=20,
+        choices=ClassType.choices,
+        default=ClassType.PRIVATE
+    )
+    
+    # Preferences
+    preferred_teacher = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='preferred_for_private',
+        verbose_name=_('معلم ترجیحی'),
+        limit_choices_to={'role': User.UserRole.TEACHER}
+    )
+    
+    preferred_days = models.JSONField(
+        _('روزهای ترجیحی'),
+        default=list,
+        help_text='["saturday", "monday"]'
+    )
+    
+    preferred_time_slot = models.CharField(
+        _('زمان ترجیحی'),
+        max_length=20,
+        choices=[
+            ('morning', 'صبح (8-12)'),
+            ('afternoon', 'بعدازظهر (12-16)'),
+            ('evening', 'عصر (16-20)'),
+            ('night', 'شب (20-23)'),
+        ],
+        default='morning'
+    )
+    
+    preferred_location = models.CharField(
+        _('محل ترجیحی'),
+        max_length=20,
+        choices=[
+            ('branch', 'شعبه'),
+            ('online', 'آنلاین'),
+            ('home', 'منزل دانش‌آموز'),
+        ],
+        default='branch'
+    )
+    
+    # Duration
+    sessions_per_week = models.PositiveIntegerField(
+        _('تعداد جلسات در هفته'),
+        default=2,
+        validators=[MinValueValidator(1), MaxValueValidator(7)]
+    )
+    
+    total_sessions = models.PositiveIntegerField(
+        _('تعداد کل جلسات'),
+        default=24,
+        validators=[MinValueValidator(4)]
+    )
+    
+    session_duration = models.PositiveIntegerField(
+        _('مدت هر جلسه (دقیقه)'),
+        default=90,
+        choices=[
+            (60, '60 دقیقه'),
+            (90, '90 دقیقه'),
+            (120, '120 دقیقه'),
+        ]
+    )
+    
+    # Start Date
+    preferred_start_date = models.DateField(
+        _('تاریخ شروع ترجیحی'),
+        null=True,
+        blank=True
+    )
+    
+    # Status
+    status = models.CharField(
+        _('وضعیت'),
+        max_length=20,
+        choices=RequestStatus.choices,
+        default=RequestStatus.PENDING
+    )
+    
+    # ⚠️ حذف قسمت قیمت‌گذاری - باید از طریق Invoice مدیریت شود
+    # pricing_approved = models.BooleanField(_('قیمت تایید شده'), default=False)
+    
+    # Assigned
+    assigned_teacher = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_private_classes',
+        verbose_name=_('معلم اختصاص داده شده'),
+        limit_choices_to={'role': User.UserRole.TEACHER}
+    )
+    
+    created_class = models.ForeignKey(
+        Class,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='private_request_source',
+        verbose_name=_('کلاس ایجاد شده')
+    )
+    
+    # Approval
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_private_requests',
+        verbose_name=_('تایید کننده')
+    )
+    approved_at = models.DateTimeField(_('تاریخ تایید'), null=True, blank=True)
+    
+    # Notes
+    student_notes = models.TextField(_('یادداشت دانش‌آموز'), null=True, blank=True)
+    admin_notes = models.TextField(_('یادداشت مدیر'), null=True, blank=True)
+    rejection_reason = models.TextField(_('دلیل رد'), null=True, blank=True)
+
+    class Meta:
+        db_table = 'private_class_requests'
+        verbose_name = _('درخواست کلاس خصوصی')
+        verbose_name_plural = _('درخواست‌های کلاس خصوصی')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.request_number} - {self.primary_student.get_full_name()}"
+
+    def save(self, *args, **kwargs):
+        if not self.request_number:
+            from django.utils import timezone
+            year = timezone.now().year
+            count = PrivateClassRequest.objects.filter(
+                created_at__year=year
+            ).count() + 1
+            self.request_number = f"PVT{year}{count:05d}"
+        
+        super().save(*args, **kwargs)
+
+    @property
+    def student_count(self):
+        return 1 + self.additional_students.count()
+
+    def calculate_estimated_price(self):
+        """محاسبه قیمت تخمینی - فقط برای نمایش"""
+        # قیمت پایه بر اساس نوع کلاس
+        base_prices = {
+            self.ClassType.PRIVATE: 500000,
+            self.ClassType.SEMI_PRIVATE_2: 350000,
+            self.ClassType.SEMI_PRIVATE_3: 300000,
+            self.ClassType.SEMI_PRIVATE_4: 250000,
+        }
+        
+        base_price = base_prices.get(self.class_type, 500000)
+        total = base_price * self.total_sessions
+        
+        # تخفیف بر اساس تعداد جلسات
+        if self.total_sessions >= 48:
+            discount_percent = 15
+        elif self.total_sessions >= 36:
+            discount_percent = 10
+        elif self.total_sessions >= 24:
+            discount_percent = 5
+        else:
+            discount_percent = 0
+        
+        discount = (total * discount_percent) / 100
+        
+        return {
+            'base_price_per_session': base_price,
+            'total_sessions': self.total_sessions,
+            'subtotal': total,
+            'discount_percent': discount_percent,
+            'discount_amount': discount,
+            'estimated_total': total - discount
+        }
+        
+class PrivateClassPricing(TimeStampedModel):
+    """
+    قیمت‌گذاری کلاس‌های خصوصی
+    """
+    class_type = models.CharField(
+        _('نوع کلاس'),
+        max_length=20,
+        choices=PrivateClassRequest.ClassType.choices,
+        unique=True
+    )
+    
+    price_per_session = models.DecimalField(
+        _('قیمت هر جلسه'),
+        max_digits=12,
+        decimal_places=0,
+        validators=[MinValueValidator(0)]
+    )
+    
+    # تخفیف بر اساس تعداد جلسات
+    discount_24_sessions = models.DecimalField(
+        _('تخفیف 24 جلسه (درصد)'),
+        max_digits=5,
+        decimal_places=2,
+        default=5
+    )
+    
+    discount_36_sessions = models.DecimalField(
+        _('تخفیف 36 جلسه (درصد)'),
+        max_digits=5,
+        decimal_places=2,
+        default=10
+    )
+    
+    discount_48_sessions = models.DecimalField(
+        _('تخفیف 48 جلسه یا بیشتر (درصد)'),
+        max_digits=5,
+        decimal_places=2,
+        default=15
+    )
+    
+    is_active = models.BooleanField(_('فعال'), default=True)
+    
+    class Meta:
+        db_table = 'private_class_pricing'
+        verbose_name = _('قیمت‌گذاری کلاس خصوصی')
+        verbose_name_plural = _('قیمت‌گذاری کلاس‌های خصوصی')
+
+    def __str__(self):
+        return f"{self.get_class_type_display()} - {self.price_per_session:,} تومان"
+
+    def calculate_total(self, sessions):
+        """محاسبه قیمت کل با تخفیف"""
+        subtotal = self.price_per_session * sessions
+        
+        if sessions >= 48:
+            discount_percent = self.discount_48_sessions
+        elif sessions >= 36:
+            discount_percent = self.discount_36_sessions
+        elif sessions >= 24:
+            discount_percent = self.discount_24_sessions
+        else:
+            discount_percent = 0
+        
+        discount = (subtotal * discount_percent) / 100
+        
+        return {
+            'subtotal': subtotal,
+            'discount_percent': discount_percent,
+            'discount_amount': discount,
+            'total': subtotal - discount
+        }

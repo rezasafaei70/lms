@@ -29,7 +29,7 @@ kavenegar==1.1.2
 zeep==4.2.1
 
 # BigBlueButton
-bigbluebutton-api-python==0.0.10
+bigbluebutton-api-python
 
 # Utils
 python-dateutil==2.8.2

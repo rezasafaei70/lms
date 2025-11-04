@@ -62,7 +62,7 @@ class AnnualRegistrationAdmin(admin.ModelAdmin):
         'student', 'branch', 'academic_year', 'status',
         'registration_date', 'is_paid'
     ]
-    list_filter = ['status', 'academic_year', 'is_paid', 'documents_verified']
+    list_filter = ['status', 'academic_year', 'documents_verified']
     search_fields = ['student__first_name', 'student__last_name', 'academic_year']
     ordering = ['-registration_date']
 

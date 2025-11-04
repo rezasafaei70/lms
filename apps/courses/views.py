@@ -6,10 +6,10 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q, Count, Avg, F
 
-from .models import Course, Class, ClassSession, Term, TeacherReview
+from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Term, TeacherReview
 from .serializers import (
     CourseSerializer, CourseListSerializer, ClassSerializer,
-    ClassListSerializer, ClassSessionSerializer, TermSerializer,
+    ClassListSerializer, ClassSessionSerializer, PrivateClassPricingSerializer, TermSerializer,
     TeacherReviewSerializer, CourseStatisticsSerializer
 )
 from utils.permissions import IsSuperAdmin, IsTeacher, IsStudent
@@ -535,3 +535,476 @@ class TeacherReviewViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(reviews, many=True)
         return Response(serializer.data)
+    
+
+class PrivateClassPricingViewSet(viewsets.ModelViewSet):
+    """
+    مدیریت قیمت‌گذاری کلاس‌های خصوصی
+    """
+    queryset = PrivateClassPricing.objects.all()
+    serializer_class = PrivateClassPricingSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['class_type', 'is_active']
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve', 'calculate']:
+            return [IsAuthenticated()]
+        return [IsSuperAdmin()]
+
+    @action(detail=False, methods=['get'], url_path='active')
+    def active_pricing(self, request):
+        """
+        دریافت قیمت‌های فعال
+        GET /api/v1/courses/private-pricing/active/
+        """
+        pricing = self.get_queryset().filter(is_active=True)
+        serializer = self.get_serializer(pricing, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='calculate')
+    def calculate_price(self, request):
+        """
+        محاسبه قیمت
+        POST /api/v1/courses/private-pricing/calculate/
+        {
+            "class_type": "private",
+            "total_sessions": 24
+        }
+        """
+        class_type = request.data.get('class_type')
+        total_sessions = int(request.data.get('total_sessions', 24))
+        
+        try:
+            pricing = PrivateClassPricing.objects.get(
+                class_type=class_type,
+                is_active=True
+            )
+        except PrivateClassPricing.DoesNotExist:
+            return Response({
+                'error': 'قیمت‌گذاری برای این نوع کلاس یافت نشد'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        result = pricing.calculate_total(total_sessions)
+        result['class_type'] = class_type
+        result['class_type_display'] = pricing.get_class_type_display()
+        result['price_per_session'] = pricing.price_per_session
+        result['total_sessions'] = total_sessions
+        
+        return Response(result)
+
+
+class PrivateClassRequestViewSet(viewsets.ModelViewSet):
+    """
+    مدیریت درخواست‌های کلاس خصوصی
+    """
+    queryset = PrivateClassRequest.objects.filter(is_deleted=False)
+    permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'class_type', 'branch', 'course']
+    search_fields = [
+        'request_number', 'primary_student__first_name',
+        'primary_student__last_name'
+    ]
+    ordering_fields = ['created_at', 'preferred_start_date', 'status']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return PrivateClassRequestListSerializer
+        elif self.action == 'approve':
+            return ApprovePrivateClassSerializer
+        elif self.action == 'create_class':
+            return CreateClassFromRequestSerializer
+        return PrivateClassRequestSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = super().get_queryset().select_related(
+            'primary_student', 'course', 'branch',
+            'preferred_teacher', 'assigned_teacher', 'created_class'
+        ).prefetch_related('additional_students')
+        
+        # دانش‌آموزان فقط درخواست‌های خود
+        if user.role == user.UserRole.STUDENT:
+            queryset = queryset.filter(
+                models.Q(primary_student=user) | 
+                models.Q(additional_students=user)
+            )
+        # مدیران شعبه فقط شعبه خود
+        elif user.role == user.UserRole.BRANCH_MANAGER:
+            queryset = queryset.filter(branch__manager=user)
+        
+        return queryset
+
+    def perform_create(self, serializer):
+        # دانش‌آموزان فقط می‌توانند برای خود درخواست بدهند
+        if self.request.user.role == self.request.user.UserRole.STUDENT:
+            serializer.save(primary_student=self.request.user)
+        else:
+            serializer.save()
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        """
+        تایید درخواست کلاس خصوصی
+        POST /api/v1/courses/private-requests/{id}/approve/
+        {
+            "teacher": "teacher_id",
+            "custom_price_per_session": 600000,  // optional
+            "discount_percent": 5,  // optional
+            "admin_notes": "..."  // optional
+        }
+        """
+        private_request = self.get_object()
+        
+        if private_request.status != PrivateClassRequest.RequestStatus.PENDING:
+            return Response({
+                'error': 'فقط درخواست‌های در انتظار قابل تایید هستند'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        serializer = ApprovePrivateClassSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # دریافت معلم
+        from apps.accounts.models import User
+        try:
+            teacher = User.objects.get(
+                id=serializer.validated_data['teacher'],
+                role=User.UserRole.TEACHER
+            )
+        except User.DoesNotExist:
+            return Response({
+                'error': 'معلم یافت نشد'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # محاسبه قیمت
+        custom_price = serializer.validated_data.get('custom_price_per_session')
+        discount_percent = serializer.validated_data.get('discount_percent', 0)
+        
+        if custom_price:
+            # استفاده از قیمت سفارشی
+            price_per_session = custom_price
+        else:
+            # استفاده از جدول قیمت
+            try:
+                pricing = PrivateClassPricing.objects.get(
+                    class_type=private_request.class_type,
+                    is_active=True
+                )
+                price_calculation = pricing.calculate_total(private_request.total_sessions)
+                price_per_session = pricing.price_per_session
+                # اعمال تخفیف خودکار
+                if discount_percent == 0:
+                    discount_percent = price_calculation['discount_percent']
+            except PrivateClassPricing.DoesNotExist:
+                return Response({
+                    'error': 'قیمت‌گذاری یافت نشد. لطفاً قیمت سفارشی وارد کنید'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # محاسبه مبالغ
+        subtotal = price_per_session * private_request.total_sessions
+        discount_amount = (subtotal * discount_percent) / 100
+        final_amount = subtotal - discount_amount
+        
+        with db_transaction.atomic():
+            # بروزرسانی درخواست
+            private_request.assigned_teacher = teacher
+            private_request.status = PrivateClassRequest.RequestStatus.APPROVED
+            private_request.approved_by = request.user
+            private_request.approved_at = timezone.now()
+            private_request.admin_notes = serializer.validated_data.get('admin_notes', '')
+            private_request.save()
+            
+            # ایجاد فاکتور
+            from apps.financial.models import Invoice, InvoiceItem
+            
+            invoice = Invoice.objects.create(
+                student=private_request.primary_student,
+                branch=private_request.branch,
+                invoice_type=Invoice.InvoiceType.TUITION,
+                subtotal=subtotal,
+                discount_amount=discount_amount,
+                issue_date=timezone.now().date(),
+                due_date=timezone.now().date() + timedelta(days=7),
+                created_by=request.user,
+                description=f'کلاس خصوصی {private_request.course.name} - {private_request.get_class_type_display()}'
+            )
+            
+            InvoiceItem.objects.create(
+                invoice=invoice,
+                description=f'کلاس خصوصی {private_request.course.name}',
+                quantity=private_request.total_sessions,
+                unit_price=price_per_session,
+                discount=discount_amount
+            )
+            
+            # ارسال نوتیفیکیشن
+            from apps.notifications.models import Notification
+            Notification.objects.create(
+                recipient=private_request.primary_student,
+                title='تایید درخواست کلاس خصوصی',
+                message=f'درخواست کلاس خصوصی شما تایید شد. مبلغ قابل پرداخت: {final_amount:,} تومان',
+                notification_type=Notification.NotificationType.SUCCESS,
+                category=Notification.NotificationCategory.ENROLLMENT,
+                action_url=f'/invoices/{invoice.id}/'
+            )
+        
+        return Response({
+            'message': 'درخواست تایید شد',
+            'invoice_id': str(invoice.id),
+            'total_amount': final_amount,
+            'request': PrivateClassRequestSerializer(private_request).data
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject(self, request, pk=None):
+        """
+        رد درخواست
+        POST /api/v1/courses/private-requests/{id}/reject/
+        {
+            "rejection_reason": "دلیل رد"
+        }
+        """
+        private_request = self.get_object()
+        
+        private_request.status = PrivateClassRequest.RequestStatus.REJECTED
+        private_request.rejection_reason = request.data.get('rejection_reason', '')
+        private_request.save()
+        
+        # ارسال نوتیفیکیشن
+        from apps.notifications.models import Notification
+        Notification.objects.create(
+            recipient=private_request.primary_student,
+            title='رد درخواست کلاس خصوصی',
+            message=f'متاسفانه درخواست کلاس خصوصی شما رد شد.\nدلیل: {private_request.rejection_reason}',
+            notification_type=Notification.NotificationType.ERROR,
+            category=Notification.NotificationCategory.ENROLLMENT
+        )
+        
+        return Response({
+            'message': 'درخواست رد شد'
+        })
+
+    @action(detail=True, methods=['post'], url_path='create-class')
+    def create_class(self, request, pk=None):
+        """
+        ایجاد کلاس از درخواست تایید شده
+        POST /api/v1/courses/private-requests/{id}/create-class/
+        {
+            "start_date": "2024-01-15",
+            "schedule_days": ["saturday", "monday"],
+            "start_time": "10:00",
+            "classroom": "classroom_id"  // optional
+        }
+        """
+        private_request = self.get_object()
+        
+        # بررسی وضعیت
+        if private_request.status != PrivateClassRequest.RequestStatus.APPROVED:
+            return Response({
+                'error': 'فقط درخواست‌های تایید شده قابل ایجاد کلاس هستند'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # بررسی پرداخت
+        try:
+            invoice = Invoice.objects.get(
+                student=private_request.primary_student,
+                description__contains=f'کلاس خصوصی {private_request.course.name}'
+            )
+            if not invoice.is_paid:
+                return Response({
+                    'error': 'ابتدا باید شهریه پرداخت شود',
+                    'invoice_id': str(invoice.id)
+                }, status=status.HTTP_400_BAD_REQUEST)
+        except Invoice.DoesNotExist:
+            return Response({
+                'error': 'فاکتور یافت نشد'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = CreateClassFromRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # محاسبه تاریخ پایان
+        start_date = serializer.validated_data['start_date']
+        sessions_per_week = private_request.sessions_per_week
+        total_weeks = private_request.total_sessions / sessions_per_week
+        end_date = start_date + timedelta(weeks=int(total_weeks) + 1)
+        
+        # محاسبه ساعت پایان
+        start_time = serializer.validated_data['start_time']
+        start_datetime = datetime.combine(datetime.today(), start_time)
+        end_datetime = start_datetime + timedelta(minutes=private_request.session_duration)
+        end_time = end_datetime.time()
+        
+        with db_transaction.atomic():
+            # ایجاد کلاس
+            import secrets
+            new_class = Class.objects.create(
+                course=private_request.course,
+                branch=private_request.branch,
+                teacher=private_request.assigned_teacher,
+                classroom_id=serializer.validated_data.get('classroom'),
+                name=f"کلاس خصوصی {private_request.course.name} - {private_request.primary_student.get_full_name()}",
+                code=f"PVT{secrets.token_hex(4).upper()}",
+                class_type=(
+                    Class.ClassType.PRIVATE 
+                    if private_request.class_type == PrivateClassRequest.ClassType.PRIVATE 
+                    else Class.ClassType.SEMI_PRIVATE
+                ),
+                start_date=start_date,
+                end_date=end_date,
+                schedule_days=serializer.validated_data['schedule_days'],
+                start_time=start_time,
+                end_time=end_time,
+                capacity=private_request.student_count,
+                current_enrollments=0,
+                price=invoice.total_amount,
+                registration_start=timezone.now(),
+                registration_end=timezone.now(),
+                is_registration_open=False,
+                status=Class.ClassStatus.SCHEDULED
+            )
+            
+            # ایجاد ثبت‌نام برای دانش‌آموز اصلی
+            from apps.enrollments.models import Enrollment
+            
+            Enrollment.objects.create(
+                student=private_request.primary_student,
+                class_obj=new_class,
+                status=Enrollment.EnrollmentStatus.ACTIVE,
+                total_amount=invoice.total_amount,
+                final_amount=invoice.total_amount,
+                paid_amount=invoice.paid_amount
+            )
+            new_class.current_enrollments += 1
+            
+            # ایجاد ثبت‌نام برای دانش‌آموزان اضافی
+            for student in private_request.additional_students.all():
+                Enrollment.objects.create(
+                    student=student,
+                    class_obj=new_class,
+                    status=Enrollment.EnrollmentStatus.ACTIVE,
+                    total_amount=0,
+                    final_amount=0,
+                    paid_amount=0
+                )
+                new_class.current_enrollments += 1
+            
+            new_class.save()
+            
+            # بروزرسانی درخواست
+            private_request.created_class = new_class
+            private_request.status = PrivateClassRequest.RequestStatus.SCHEDULED
+            private_request.save()
+            
+            # ایجاد جلسات
+            from apps.courses.utils import generate_class_sessions
+            sessions = generate_class_sessions(new_class)
+            
+            # ارسال نوتیفیکیشن
+            from apps.notifications.models import Notification
+            Notification.objects.create(
+                recipient=private_request.primary_student,
+                title='کلاس خصوصی شما آماده است',
+                message=f'کلاس خصوصی شما با موفقیت ایجاد شد. تاریخ شروع: {start_date}',
+                notification_type=Notification.NotificationType.SUCCESS,
+                category=Notification.NotificationCategory.CLASS,
+                action_url=f'/classes/{new_class.id}/'
+            )
+        
+        return Response({
+            'message': 'کلاس با موفقیت ایجاد شد',
+            'class_id': str(new_class.id),
+            'total_sessions': len(sessions),
+            'class': ClassSerializer(new_class).data
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='my-requests')
+    def my_requests(self, request):
+        """
+        درخواست‌های کاربر جاری
+        GET /api/v1/courses/private-requests/my-requests/
+        """
+        user = request.user
+        requests_qs = self.get_queryset().filter(
+            models.Q(primary_student=user) | 
+            models.Q(additional_students=user)
+        )
+        
+        serializer = self.get_serializer(requests_qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='pending')
+    def pending_requests(self, request):
+        """
+        درخواست‌های در انتظار تایید
+        GET /api/v1/courses/private-requests/pending/
+        """
+        requests_qs = self.get_queryset().filter(
+            status=PrivateClassRequest.RequestStatus.PENDING
+        ).order_by('created_at')
+        
+        serializer = self.get_serializer(requests_qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='statistics')
+    def statistics(self, request):
+        """
+        آمار درخواست‌های کلاس خصوصی
+        GET /api/v1/courses/private-requests/statistics/
+        """
+        queryset = self.get_queryset()
+        
+        stats = {
+            'total': queryset.count(),
+            'pending': queryset.filter(
+                status=PrivateClassRequest.RequestStatus.PENDING
+            ).count(),
+            'approved': queryset.filter(
+                status=PrivateClassRequest.RequestStatus.APPROVED
+            ).count(),
+            'scheduled': queryset.filter(
+                status=PrivateClassRequest.RequestStatus.SCHEDULED
+            ).count(),
+            'rejected': queryset.filter(
+                status=PrivateClassRequest.RequestStatus.REJECTED
+            ).count(),
+            'by_class_type': dict(
+                queryset.values('class_type').annotate(
+                    count=Count('id')
+                ).values_list('class_type', 'count')
+            ),
+        }
+        
+        return Response(stats)
+
+    @action(detail=True, methods=['post'], url_path='cancel')
+    def cancel(self, request, pk=None):
+        """
+        لغو درخواست توسط دانش‌آموز
+        POST /api/v1/courses/private-requests/{id}/cancel/
+        """
+        private_request = self.get_object()
+        
+        # فقط دانش‌آموز اصلی می‌تواند لغو کند
+        if request.user != private_request.primary_student:
+            return Response({
+                'error': 'فقط دانش‌آموز اصلی می‌تواند درخواست را لغو کند'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # فقط در وضعیت pending و approved
+        if private_request.status not in [
+            PrivateClassRequest.RequestStatus.PENDING,
+            PrivateClassRequest.RequestStatus.APPROVED
+        ]:
+            return Response({
+                'error': 'این درخواست قابل لغو نیست'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        private_request.status = PrivateClassRequest.RequestStatus.CANCELLED
+        private_request.save()
+        
+        return Response({
+            'message': 'درخواست لغو شد'
+        })

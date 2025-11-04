@@ -19,3 +19,14 @@ app.conf.beat_schedule = {
         'schedule': crontab(minute='*/30'),  # Every 30 minutes
     },
 }
+
+app.conf.beat_schedule = {
+    'expire-old-registrations': {
+        'task': 'apps.enrollments.tasks.expire_old_registrations',
+        'schedule': crontab(hour=1, minute=0),  # هر روز ساعت 1 صبح
+    },
+    'send-registration-expiry-reminders': {
+        'task': 'apps.enrollments.tasks.send_registration_expiry_reminders',
+        'schedule': crontab(hour=9, minute=0),  # هر روز ساعت 9 صبح
+    },
+}

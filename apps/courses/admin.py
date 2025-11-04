@@ -1,6 +1,6 @@
 from django.contrib import admin
-from .models import Course, Class, ClassSession, Term, TeacherReview
-
+from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Term, TeacherReview
+from django.utils import timezone
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
@@ -72,3 +72,113 @@ class TeacherReviewAdmin(admin.ModelAdmin):
     def reject_reviews(self, request, queryset):
         queryset.delete()
     reject_reviews.short_description = 'حذف نظرات انتخاب شده'
+    
+    
+
+@admin.register(PrivateClassPricing)
+class PrivateClassPricingAdmin(admin.ModelAdmin):
+    list_display = [
+        'class_type', 'price_per_session', 'discount_24_sessions',
+        'discount_36_sessions', 'discount_48_sessions', 'is_active'
+    ]
+    list_filter = ['class_type', 'is_active']
+    ordering = ['class_type']
+    
+    fieldsets = (
+        ('نوع کلاس', {
+            'fields': ('class_type', 'is_active')
+        }),
+        ('قیمت‌گذاری', {
+            'fields': ('price_per_session',)
+        }),
+        ('تخفیفات', {
+            'fields': (
+                'discount_24_sessions',
+                'discount_36_sessions',
+                'discount_48_sessions'
+            )
+        }),
+    )
+
+
+@admin.register(PrivateClassRequest)
+class PrivateClassRequestAdmin(admin.ModelAdmin):
+    list_display = [
+        'request_number', 'primary_student', 'course', 'class_type',
+        'total_sessions', 'status', 'created_at'
+    ]
+    list_filter = [
+        'status', 'class_type', 'branch', 'preferred_location',
+        'created_at'
+    ]
+    search_fields = [
+        'request_number', 'primary_student__first_name',
+        'primary_student__last_name', 'primary_student__mobile'
+    ]
+    readonly_fields = [
+        'request_number', 'created_at', 'updated_at',
+        'approved_by', 'approved_at', 'student_count_display'
+    ]
+    ordering = ['-created_at']
+    
+    filter_horizontal = ['additional_students']
+    
+    fieldsets = (
+        ('اطلاعات درخواست', {
+            'fields': (
+                'request_number', 'status', 'primary_student',
+                'additional_students', 'student_count_display'
+            )
+        }),
+        ('دوره و شعبه', {
+            'fields': ('course', 'branch')
+        }),
+        ('نوع و تنظیمات کلاس', {
+            'fields': (
+                'class_type', 'sessions_per_week', 'total_sessions',
+                'session_duration'
+            )
+        }),
+        ('ترجیحات', {
+            'fields': (
+                'preferred_teacher', 'preferred_days',
+                'preferred_time_slot', 'preferred_location',
+                'preferred_start_date'
+            )
+        }),
+        ('اختصاص و تایید', {
+            'fields': (
+                'assigned_teacher', 'created_class',
+                'approved_by', 'approved_at'
+            )
+        }),
+        ('یادداشت‌ها', {
+            'fields': ('student_notes', 'admin_notes', 'rejection_reason')
+        }),
+    )
+    
+    def student_count_display(self, obj):
+        return obj.student_count
+    student_count_display.short_description = 'تعداد دانش‌آموزان'
+    
+    actions = ['approve_selected', 'reject_selected']
+    
+    def approve_selected(self, request, queryset):
+        count = queryset.filter(
+            status=PrivateClassRequest.RequestStatus.PENDING
+        ).update(
+            status=PrivateClassRequest.RequestStatus.APPROVED,
+            approved_by=request.user,
+            approved_at=timezone.now()
+        )
+        self.message_user(request, f'{count} درخواست تایید شد')
+    approve_selected.short_description = 'تایید درخواست‌های انتخاب شده'
+    
+    def reject_selected(self, request, queryset):
+        count = queryset.filter(
+            status=PrivateClassRequest.RequestStatus.PENDING
+        ).update(
+            status=PrivateClassRequest.RequestStatus.REJECTED
+        )
+        self.message_user(request, f'{count} درخواست رد شد')
+    reject_selected.short_description = 'رد درخواست‌های انتخاب شده'

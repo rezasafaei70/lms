@@ -37,3 +37,56 @@ class SoftDeleteModel(models.Model):
         self.is_deleted = False
         self.deleted_at = None
         self.save()
+        
+class SystemSettings(TimeStampedModel):
+    """
+    System-wide Settings
+    """
+    class SettingType(models.TextChoices):
+        FINANCIAL = 'financial', _('مالی')
+        ACADEMIC = 'academic', _('آموزشی')
+        GENERAL = 'general', _('عمومی')
+
+    key = models.CharField(_('کلید'), max_length=100, unique=True)
+    value = models.TextField(_('مقدار'))
+    setting_type = models.CharField(
+        _('نوع تنظیمات'),
+        max_length=20,
+        choices=SettingType.choices,
+        default=SettingType.GENERAL
+    )
+    description = models.TextField(_('توضیحات'), null=True, blank=True)
+    is_active = models.BooleanField(_('فعال'), default=True)
+
+    class Meta:
+        db_table = 'system_settings'
+        verbose_name = _('تنظیمات سیستم')
+        verbose_name_plural = _('تنظیمات سیستم')
+
+    def __str__(self):
+        return f"{self.key}: {self.value}"
+
+    @classmethod
+    def get_value(cls, key, default=None):
+        """دریافت مقدار تنظیمات"""
+        try:
+            setting = cls.objects.get(key=key, is_active=True)
+            return setting.value
+        except cls.DoesNotExist:
+            return default
+
+    @classmethod
+    def get_annual_registration_fee(cls):
+        """دریافت هزینه ثبت‌نام سالانه"""
+        value = cls.get_value('annual_registration_fee', '2000000')
+        return int(value)
+
+    @classmethod
+    def get_private_class_prices(cls):
+        """دریافت قیمت‌های کلاس خصوصی"""
+        return {
+            'private': int(cls.get_value('private_class_price_per_session', '500000')),
+            'semi_private_2': int(cls.get_value('semi_private_2_price_per_session', '350000')),
+            'semi_private_3': int(cls.get_value('semi_private_3_price_per_session', '300000')),
+            'semi_private_4': int(cls.get_value('semi_private_4_price_per_session', '250000')),
+        }

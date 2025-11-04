@@ -3,10 +3,10 @@ from django.utils import timezone
 from django.db.models import Avg, Count
 
 from apps.lms.serializers import AssignmentSerializer, CourseMaterialSerializer
-from .models import Course, Class, ClassSession, Term, TeacherReview
+from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Term, TeacherReview
 from apps.accounts.serializers import UserSerializer
 from apps.branches.serializers import BranchSerializer, ClassroomSerializer
-
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 class CourseSerializer(serializers.ModelSerializer):
     """
@@ -274,3 +274,190 @@ class CourseStatisticsSerializer(serializers.Serializer):
     ongoing_classes = serializers.IntegerField()
     total_enrollments = serializers.IntegerField()
     popular_courses = CourseListSerializer(many=True)
+    
+    
+    
+class PrivateClassPricingSerializer(serializers.ModelSerializer):
+    """
+    قیمت‌گذاری کلاس خصوصی
+    """
+    class_type_display = serializers.CharField(
+        source='get_class_type_display',
+        read_only=True
+    )
+    
+    class Meta:
+        model = PrivateClassPricing
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class PrivateClassRequestSerializer(serializers.ModelSerializer):
+    """
+    درخواست کلاس خصوصی - Serializer کامل
+    """
+    # Related objects
+    primary_student_details = UserSerializer(source='primary_student', read_only=True)
+    additional_students_details = UserSerializer(
+        source='additional_students',
+        many=True,
+        read_only=True
+    )
+    course_details = CourseListSerializer(source='course', read_only=True)
+    branch_details = BranchSerializer(source='branch', read_only=True)
+    preferred_teacher_details = UserSerializer(source='preferred_teacher', read_only=True)
+    assigned_teacher_details = UserSerializer(source='assigned_teacher', read_only=True)
+    
+    # Display fields
+    class_type_display = serializers.CharField(
+        source='get_class_type_display',
+        read_only=True
+    )
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    preferred_time_slot_display = serializers.CharField(
+        source='get_preferred_time_slot_display',
+        read_only=True
+    )
+    preferred_location_display = serializers.CharField(
+        source='get_preferred_location_display',
+        read_only=True
+    )
+    
+    # Calculated fields
+    student_count = serializers.IntegerField(read_only=True)
+    estimated_pricing = serializers.SerializerMethodField()
+    
+    # Created class info
+    created_class_details = ClassListSerializer(source='created_class', read_only=True)
+    
+    class Meta:
+        model = PrivateClassRequest
+        fields = [
+            'id', 'request_number', 
+            'primary_student', 'primary_student_details',
+            'additional_students', 'additional_students_details',
+            'course', 'course_details',
+            'branch', 'branch_details',
+            'class_type', 'class_type_display',
+            'preferred_teacher', 'preferred_teacher_details',
+            'preferred_days', 'preferred_time_slot', 'preferred_time_slot_display',
+            'preferred_location', 'preferred_location_display',
+            'sessions_per_week', 'total_sessions', 'session_duration',
+            'preferred_start_date',
+            'status', 'status_display',
+            'assigned_teacher', 'assigned_teacher_details',
+            'created_class', 'created_class_details',
+            'approved_by', 'approved_at',
+            'student_notes', 'admin_notes', 'rejection_reason',
+            'student_count', 'estimated_pricing',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'created_at', 'updated_at', 'request_number',
+            'assigned_teacher', 'created_class', 'approved_by', 'approved_at'
+        ]
+
+    def get_estimated_pricing(self, obj):
+        """محاسبه قیمت تخمینی"""
+        return obj.calculate_estimated_price()
+
+    def validate(self, attrs):
+        # بررسی تعداد دانش‌آموزان اضافی
+        class_type = attrs.get('class_type')
+        additional_students = attrs.get('additional_students', [])
+        
+        max_additional = {
+            PrivateClassRequest.ClassType.PRIVATE: 0,
+            PrivateClassRequest.ClassType.SEMI_PRIVATE_2: 1,
+            PrivateClassRequest.ClassType.SEMI_PRIVATE_3: 2,
+            PrivateClassRequest.ClassType.SEMI_PRIVATE_4: 4,
+        }
+        
+        max_allowed = max_additional.get(class_type, 0)
+        if len(additional_students) > max_allowed:
+            raise serializers.ValidationError({
+                'additional_students': f'برای {class_type} حداکثر {max_allowed} دانش‌آموز اضافی مجاز است'
+            })
+        
+        # بررسی تاریخ شروع
+        preferred_start_date = attrs.get('preferred_start_date')
+        if preferred_start_date:
+            from django.utils import timezone
+            if preferred_start_date < timezone.now().date():
+                raise serializers.ValidationError({
+                    'preferred_start_date': 'تاریخ شروع نمی‌تواند در گذشته باشد'
+                })
+        
+        return attrs
+
+
+class PrivateClassRequestListSerializer(serializers.ModelSerializer):
+    """
+    لیست درخواست‌های کلاس خصوصی - ساده شده
+    """
+    student_name = serializers.CharField(
+        source='primary_student.get_full_name',
+        read_only=True
+    )
+    course_name = serializers.CharField(source='course.name', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    student_count = serializers.IntegerField(read_only=True)
+    
+    class Meta:
+        model = PrivateClassRequest
+        fields = [
+            'id', 'request_number', 'student_name', 'course_name',
+            'branch_name', 'class_type', 'status', 'status_display',
+            'total_sessions', 'student_count', 'preferred_start_date',
+            'created_at'
+        ]
+
+
+class ApprovePrivateClassSerializer(serializers.Serializer):
+    """
+    تایید درخواست کلاس خصوصی
+    """
+    teacher = serializers.UUIDField(required=True)
+    custom_price_per_session = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=0,
+        required=False,
+        allow_null=True,
+        help_text='قیمت سفارشی - اگر خالی باشد از جدول قیمت استفاده می‌شود'
+    )
+    discount_percent = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        required=False,
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    admin_notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class CreateClassFromRequestSerializer(serializers.Serializer):
+    """
+    ایجاد کلاس از درخواست
+    """
+    start_date = serializers.DateField()
+    schedule_days = serializers.ListField(
+        child=serializers.CharField(),
+        min_length=1,
+        help_text='["saturday", "monday", "wednesday"]'
+    )
+    start_time = serializers.TimeField()
+    classroom = serializers.UUIDField(required=False, allow_null=True)
+    
+    def validate_schedule_days(self, value):
+        valid_days = ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday']
+        for day in value:
+            if day not in valid_days:
+                raise serializers.ValidationError(f'روز {day} معتبر نیست')
+        return value
+
+    def validate_start_date(self, value):
+        from django.utils import timezone
+        if value < timezone.now().date():
+            raise serializers.ValidationError('تاریخ شروع نمی‌تواند در گذشته باشد')
+        return value

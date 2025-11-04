@@ -546,64 +546,226 @@ class AnnualRegistrationViewSet(viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['student', 'branch', 'academic_year', 'status']
-    ordering_fields = ['registration_date']
+    ordering_fields = ['created_at']
 
     def get_queryset(self):
         user = self.request.user
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().select_related(
+            'student', 'branch', 'invoice'
+        )
         
-        # Students see only their registrations
         if user.role == user.UserRole.STUDENT:
             queryset = queryset.filter(student=user)
-        # Branch managers see their branch registrations
         elif user.role == user.UserRole.BRANCH_MANAGER:
             queryset = queryset.filter(branch__manager=user)
         
-        return queryset.select_related('student', 'branch')
+        return queryset
 
-    def perform_create(self, serializer):
-        if self.request.user.role == self.request.user.UserRole.STUDENT:
-            serializer.save(student=self.request.user)
-        else:
-            serializer.save()
-
-    @action(detail=False, methods=['get'], url_path='my-registrations')
-    def my_registrations(self, request):
+    @action(detail=False, methods=['post'], url_path='register')
+    def create_registration(self, request):
         """
-        Get current user annual registrations
-        GET /api/v1/enrollments/annual-registrations/my-registrations/
+        ثبت‌نام سالانه جدید
+        POST /api/v1/enrollments/annual-registrations/register/
+        {
+            "branch": "branch_id",
+            "academic_year": "1403-1404"  // optional - auto-detected
+        }
         """
-        registrations = self.get_queryset().filter(student=request.user)
+        from apps.financial.models import Invoice, InvoiceItem
+        from apps.core.models import SystemSettings
         
-        serializer = self.get_serializer(registrations, many=True)
-        return Response(serializer.data)
+        # دریافت سال تحصیلی
+        academic_year = request.data.get('academic_year')
+        if not academic_year:
+            import jdatetime
+            current_year = jdatetime.datetime.now().year
+            academic_year = f"{current_year}-{current_year + 1}"
+        
+        # بررسی ثبت‌نام قبلی
+        if AnnualRegistration.objects.filter(
+            student=request.user,
+            academic_year=academic_year
+        ).exists():
+            return Response({
+                'error': 'شما قبلاً برای این سال ثبت‌نام کرده‌اید'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # دریافت شعبه
+        try:
+            from apps.branches.models import Branch
+            branch = Branch.objects.get(id=request.data.get('branch'))
+        except Branch.DoesNotExist:
+            return Response({
+                'error': 'شعبه یافت نشد'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # دریافت هزینه ثبت‌نام از تنظیمات
+        registration_fee = SystemSettings.get_annual_registration_fee()
+        
+        # محاسبه تاریخ شروع و پایان
+        import jdatetime
+        year = int(academic_year.split('-')[0])
+        start_date = jdatetime.date(year, 7, 1).togregorian()  # 1 مهر
+        end_date = jdatetime.date(year + 1, 6, 31).togregorian()  # 31 شهریور
+        
+        with db_transaction.atomic():
+            # ایجاد ثبت‌نام
+            registration = AnnualRegistration.objects.create(
+                student=request.user,
+                branch=branch,
+                academic_year=academic_year,
+                start_date=start_date,
+                end_date=end_date,
+                registration_fee_setting=registration_fee,
+                status=AnnualRegistration.RegistrationStatus.DRAFT
+            )
+            
+            # ✅ ایجاد فاکتور
+            invoice = Invoice.objects.create(
+                student=request.user,
+                branch=branch,
+                invoice_type=Invoice.InvoiceType.REGISTRATION,
+                subtotal=registration_fee,
+                issue_date=timezone.now().date(),
+                due_date=timezone.now().date() + timezone.timedelta(days=7),
+                created_by=request.user,
+                description=f'ثبت‌نام سالانه {academic_year}'
+            )
+            
+            # ایجاد آیتم فاکتور
+            InvoiceItem.objects.create(
+                invoice=invoice,
+                description=f'شهریه ثبت‌نام سالانه {academic_year}',
+                quantity=1,
+                unit_price=registration_fee
+            )
+            
+            # اتصال فاکتور به ثبت‌نام
+            registration.invoice = invoice
+            registration.status = AnnualRegistration.RegistrationStatus.PENDING_PAYMENT
+            registration.save()
+        
+        return Response({
+            'message': 'ثبت‌نام ایجاد شد. لطفاً فاکتور را پرداخت کنید.',
+            'registration_id': str(registration.id),
+            'invoice_id': str(invoice.id),
+            'amount': registration_fee,
+            'due_date': invoice.due_date
+        }, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=['post'], url_path='activate')
-    def activate(self, request, pk=None):
+    @action(detail=True, methods=['post'], url_path='verify-documents')
+    def verify_documents(self, request, pk=None):
         """
-        Activate annual registration
-        POST /api/v1/enrollments/annual-registrations/{id}/activate/
+        تایید مدارک ثبت‌نام
+        POST /api/v1/enrollments/annual-registrations/{id}/verify-documents/
         """
         registration = self.get_object()
         
-        if not registration.is_paid:
+        if not registration.documents_submitted:
             return Response({
-                'error': 'شهریه پرداخت نشده است'
+                'error': 'مدارک هنوز ارسال نشده است'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        if not registration.documents_verified:
-            return Response({
-                'error': 'مدارک تایید نشده است'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        registration.documents_verified = True
+        registration.verified_by = request.user
+        registration.verified_at = timezone.now()
         
-        registration.status = AnnualRegistration.RegistrationStatus.ACTIVE
+        # اگر پرداخت هم انجام شده، وضعیت را تغییر بده
+        if registration.is_paid:
+            registration.status = AnnualRegistration.RegistrationStatus.PENDING_VERIFICATION
+        
         registration.save()
         
+        # اگر همه شرایط فراهم باشد، خودکار فعال کن
+        if registration.can_activate:
+            registration.status = AnnualRegistration.RegistrationStatus.ACTIVE
+            registration.activated_by = request.user
+            registration.activated_at = timezone.now()
+            registration.save()
+            
+            # ارسال نوتیفیکیشن
+            from apps.notifications.models import Notification
+            Notification.objects.create(
+                recipient=registration.student,
+                title='ثبت‌نام سالانه فعال شد',
+                message=f'ثبت‌نام سالانه شما برای {registration.academic_year} فعال شد.',
+                notification_type=Notification.NotificationType.SUCCESS,
+                category=Notification.NotificationCategory.ENROLLMENT
+            )
+        
         return Response({
-            'message': 'ثبت‌نام سالانه فعال شد'
+            'message': 'مدارک تایید شد',
+            'registration_activated': registration.status == AnnualRegistration.RegistrationStatus.ACTIVE
         })
 
+    @action(detail=False, methods=['get'], url_path='my-registration')
+    def my_current_registration(self, request):
+        """
+        دریافت ثبت‌نام فعلی کاربر
+        GET /api/v1/enrollments/annual-registrations/my-registration/
+        """
+        import jdatetime
+        current_year = jdatetime.datetime.now().year
+        academic_year = f"{current_year}-{current_year + 1}"
+        
+        try:
+            registration = AnnualRegistration.objects.select_related(
+                'invoice', 'branch'
+            ).get(
+                student=request.user,
+                academic_year=academic_year
+            )
+            
+            serializer = self.get_serializer(registration)
+            data = serializer.data
+            
+            # اضافه کردن اطلاعات مالی از Invoice
+            if registration.invoice:
+                data['payment_info'] = {
+                    'invoice_id': str(registration.invoice.id),
+                    'total_amount': registration.invoice.total_amount,
+                    'paid_amount': registration.invoice.paid_amount,
+                    'remaining': registration.invoice.remaining_amount,
+                    'status': registration.invoice.status,
+                    'due_date': registration.invoice.due_date,
+                    'is_paid': registration.invoice.is_paid,
+                }
+            
+            return Response(data)
+            
+        except AnnualRegistration.DoesNotExist:
+            return Response({
+                'registered': False,
+                'academic_year': academic_year,
+                'registration_fee': SystemSettings.get_annual_registration_fee(),
+                'message': 'شما هنوز برای این سال ثبت‌نام نکرده‌اید'
+            }, status=status.HTTP_404_NOT_FOUND)
 
+    @action(detail=True, methods=['get'], url_path='payment-url')
+    def get_payment_url(self, request, pk=None):
+        """
+        دریافت لینک پرداخت
+        GET /api/v1/enrollments/annual-registrations/{id}/payment-url/
+        """
+        registration = self.get_object()
+        
+        if not registration.invoice:
+            return Response({
+                'error': 'فاکتوری یافت نشد'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        if registration.invoice.is_paid:
+            return Response({
+                'error': 'این فاکتور قبلاً پرداخت شده است'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # ایجاد لینک پرداخت
+        # این بخش در financial views است
+        return Response({
+            'invoice_id': str(registration.invoice.id),
+            'payment_url': f'/api/v1/financial/invoices/{registration.invoice.id}/pay/',
+            'amount': registration.invoice.total_amount
+        })
 class EnrollmentDocumentViewSet(viewsets.ModelViewSet):
     """
     Enrollment Document ViewSet
