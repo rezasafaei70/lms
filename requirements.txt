@@ -1,59 +1,78 @@
-# Core
-Django==4.2.7
-djangorestframework==3.14.0
-python-decouple==3.8
-
-# Database
-# psycopg2-binary==2.9.9
-dj-database-url==2.1.0
-
-# Authentication & Security
-djangorestframework-simplejwt==5.3.0
-django-cors-headers==4.3.0
-cryptography==41.0.7
-
-# Caching & Queue
-redis==5.0.1
-django-redis==5.4.0
+amqp==5.3.1
+asgiref==3.10.0
+attrs==25.4.0
+bigbluebutton-api-python==0.0.11
+billiard==4.2.2
 celery==5.3.4
-
-# File Storage
-django-storages==1.14.2
-boto3==1.29.7
-# Pillow==10.1.0
-
-# SMS & Notifications
-kavenegar==1.1.2
-
-# Payment
-zeep==4.2.1
-
-# BigBlueButton
-bigbluebutton-api-python
-
-# Utils
-python-dateutil==2.8.2
+certifi==2025.10.5
+charset-normalizer==3.4.4
+click==8.3.0
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.3.0
+colorama==0.4.6
+cron_descriptor==2.0.6
+diff-match-patch==20241021
+Django==5.2.7
+django-celery-beat==2.8.1
+django-celery-results==2.5.1
+django-cleanup==8.0.0
+django-cors-headers==4.9.0
+django-crispy-forms==2.1
+django-debug-toolbar==6.0.0
+django-environ==0.12.0
+django-filter==25.2
+django-import-export==4.3.13
+django-phonenumber-field==8.3.0
+django-redis==6.0.0
+django-timezone-field==7.1
+djangorestframework==3.16.1
+djangorestframework_simplejwt==5.5.1
+drf-spectacular==0.28.0
+drf-yasg==1.21.11
+et_xmlfile==2.0.0
+idna==3.11
+inflection==0.5.1
+isodate==0.7.2
 jdatetime==4.1.1
-django-filter==23.5
-django-import-export==3.3.5
-openpyxl==3.1.2
-reportlab==4.0.7
-
-# Monitoring & Logging
-sentry-sdk==1.38.0
-
-# Development
-django-debug-toolbar==4.2.0
-django-extensions==3.2.3
-faker==20.1.0
-
-# Testing
-pytest==7.4.3
-pytest-django==4.7.0
-factory-boy==3.3.0
-coverage==7.3.2
-
-# Code Quality
-black==23.11.0
-flake8==6.1.0
-isort==5.12.0
+jsonschema==4.25.1
+jsonschema-specifications==2025.9.1
+jxmlease==1.0.3
+kavenegar==1.1.2
+kombu==5.5.4
+lxml==6.0.2
+Markdown==3.9
+numpy==2.3.4
+openpyxl==3.1.5
+packaging==25.0
+pandas==2.3.3
+phonenumbers==8.13.36
+pillow==12.0.0
+platformdirs==4.5.0
+prompt_toolkit==3.0.52
+psycopg2==2.9.11
+PyJWT==2.10.1
+python-crontab==3.3.0
+python-dateutil==2.9.0.post0
+python-decouple==3.8
+pytz==2025.2
+PyYAML==6.0.3
+redis==5.0.1
+referencing==0.37.0
+reportlab==4.4.4
+requests==2.32.5
+requests-file==3.0.1
+requests-toolbelt==1.0.0
+rpds-py==0.27.1
+setuptools==78.1.1
+six==1.17.0
+sqlparse==0.5.3
+tablib==3.9.0
+typing_extensions==4.15.0
+tzdata==2025.2
+uritemplate==4.2.0
+urllib3==2.5.0
+vine==5.1.0
+wcwidth==0.2.14
+wheel==0.45.1
+zeep==4.3.2
