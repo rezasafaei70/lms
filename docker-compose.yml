@@ -3,24 +3,30 @@ version: '3.8'
 services:
   db:
     image: postgres:15
+    container_name: academy_postgres  # نام کانتینر
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
       - POSTGRES_DB=academy_db
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    ports:
-      - "5432:5432"
+      - POSTGRES_USER=academy_user
+      - POSTGRES_PASSWORD=academy_password
+    # پورت 5432 از خارج حذف شد → فقط داخل شبکه در دسترس است
+    # ports:
+    #   - "5432:5432"
+    networks:
+      - app_network
 
   redis:
     image: redis:7-alpine
+    container_name: academy_redis
     ports:
-      - "6379:6379"
+      - "6379:6379"  # اگر نیاز داری از خارج دسترسی داشته باشی، نگه دار
+    networks:
+      - app_network
 
   web:
     build: .
     command: python manage.py runserver 0.0.0.0:8000
-    # command: gunicorn config.wsgi:application --bind 0.0.0.0:8000
     volumes:
       - .:/app
       - static_volume:/app/staticfiles
@@ -32,6 +38,8 @@ services:
     depends_on:
       - db
       - redis
+    networks:
+      - app_network
 
   celery:
     build: .
@@ -43,6 +51,8 @@ services:
     depends_on:
       - db
       - redis
+    networks:
+      - app_network
 
   celery-beat:
     build: .
@@ -54,6 +64,14 @@ services:
     depends_on:
       - db
       - redis
+    networks:
+      - app_network
+
+# تعریف شبکه اختصاصی
+networks:
+  app_network:
+    driver: bridge
+    name: academy_network  # نام شبکه (اختیاری، اما مفید برای شناسایی)
 
 volumes:
   postgres_data:
