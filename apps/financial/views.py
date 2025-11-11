@@ -22,7 +22,8 @@ from .serializers import (
 )
 from utils.permissions import IsSuperAdmin, IsStudent, IsBranchManager
 from utils.pagination import StandardResultsSetPagination
-
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
 
 class InvoiceViewSet(viewsets.ModelViewSet):
     """
@@ -638,3 +639,33 @@ class FinancialReportViewSet(viewsets.ViewSet):
         
         serializer = FinancialReportSerializer(report_data)
         return Response(serializer.data)
+    
+class PaymentCallbackView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        # دریافت داده‌ها از بانک
+        transaction_id = request.data.get('id')
+        order_id = request.data.get('order_id') # همان payment_number شما
+
+        try:
+            payment = Payment.objects.get(payment_number=order_id)
+        except Payment.DoesNotExist:
+            return Response({'error': 'پرداخت یافت نشد'}, status=status.HTTP_404_NOT_FOUND)
+
+        # استعلام از وب‌سرویس بانک (این بخش باید طبق مستندات بانک نوشته شود)
+        is_successful, tracking_code = verify_bank_payment(transaction_id, payment.amount)
+
+        if is_successful:
+            with db_transaction.atomic():
+                payment.status = Payment.PaymentStatus.COMPLETED
+                payment.gateway_transaction_id = transaction_id
+                payment.gateway_reference_id = tracking_code
+                payment.verified_date = timezone.now()
+                payment.save() # این save، سیگنال post_save را فعال می‌کند
+
+            return Response({'message': 'پرداخت با موفقیت تایید شد'})
+        else:
+            payment.status = Payment.PaymentStatus.FAILED
+            payment.save()
+            return Response({'error': 'پرداخت ناموفق بود'}, status=status.HTTP_400_BAD_REQUEST)
