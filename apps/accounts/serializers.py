@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.password_validation import validate_password
-from .models import User, StudentProfile, TeacherProfile, OTP, LoginHistory
+from .models import GradeLevel, User, StudentProfile, TeacherProfile, OTP, LoginHistory
 from utils.validators import validate_iranian_mobile, validate_iranian_national_code
 import random
 from django.utils import timezone
@@ -27,13 +27,20 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'role']
 
+class GradeLevelSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر برای پایه تحصیلی
+    """
+    class Meta:
+        model = GradeLevel
+        fields = ['id', 'name', 'order', 'stage']
 
 class StudentProfileSerializer(serializers.ModelSerializer):
     """
     Student Profile Serializer
     """
     user = UserSerializer(read_only=True)
-    
+    grade_level_details = GradeLevelSerializer(source='grade_level', read_only=True)
     class Meta:
         model = StudentProfile
         fields = '__all__'
@@ -296,3 +303,5 @@ class LoginHistorySerializer(serializers.ModelSerializer):
         model = LoginHistory
         fields = '__all__'
         read_only_fields = ['id', 'created_at']
+        
+        

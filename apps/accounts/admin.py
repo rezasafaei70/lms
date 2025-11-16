@@ -1,8 +1,16 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
-from .models import User, StudentProfile, TeacherProfile, OTP, LoginHistory
+from .models import GradeLevel, User, StudentProfile, TeacherProfile, OTP, LoginHistory
 
+
+
+@admin.register(GradeLevel)
+class GradeLevelAdmin(admin.ModelAdmin):
+    list_display = ['name', 'stage', 'order', 'is_active']
+    list_filter = ['stage', 'is_active']
+    search_fields = ['name']
+    ordering = ['order']
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
@@ -52,15 +60,15 @@ class StudentProfileAdmin(admin.ModelAdmin):
     """
     Student Profile Admin
     """
-    list_display = ['user', 'student_number', 'education_level', 'is_active_student', 'registration_date']
-    list_filter = ['education_level', 'is_active_student', 'registration_date']
+    list_display = ['user', 'student_number', 'education_level','grade_level', 'is_active_student', 'registration_date']
+    list_filter = ['education_level','grade_level', 'is_active_student', 'registration_date']
     search_fields = ['user__first_name', 'user__last_name', 'student_number', 'school_name']
     ordering = ['-registration_date']
     
     fieldsets = (
         (_('کاربر'), {'fields': ('user',)}),
         (_('اطلاعات تحصیلی'), {
-            'fields': ('education_level', 'school_name', 'field_of_study', 'student_number')
+            'fields': ('education_level', 'school_name','grade_level', 'field_of_study', 'student_number')
         }),
         (_('اطلاعات ولی'), {
             'fields': ('guardian_name', 'guardian_mobile', 'guardian_national_code')
@@ -79,7 +87,7 @@ class StudentProfileAdmin(admin.ModelAdmin):
             'fields': ('is_active_student', 'notes')
         }),
     )
-    
+    autocomplete_fields = ['user', 'grade_level']
     readonly_fields = ['student_number', 'registration_date']
 
 
@@ -121,7 +129,7 @@ class TeacherProfileAdmin(admin.ModelAdmin):
             'fields': ('notes',)
         }),
     )
-    
+
     readonly_fields = ['employee_code', 'rating', 'total_reviews']
 
 

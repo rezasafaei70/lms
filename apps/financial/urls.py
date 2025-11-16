@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    InvoiceViewSet, PaymentViewSet, DiscountCouponViewSet,
+    CreditNoteViewSet, InvoiceViewSet, PaymentViewSet, DiscountCouponViewSet,
     InstallmentViewSet, TransactionViewSet, TeacherPaymentViewSet,
     FinancialReportViewSet
 )
@@ -14,6 +14,7 @@ router.register(r'installments', InstallmentViewSet, basename='installments')
 router.register(r'transactions', TransactionViewSet, basename='transactions')
 router.register(r'teacher-payments', TeacherPaymentViewSet, basename='teacher-payments')
 router.register(r'reports', FinancialReportViewSet, basename='reports')
+router.register(r'credit', CreditNoteViewSet, basename='credit') 
 
 urlpatterns = [
     path('', include(router.urls)),

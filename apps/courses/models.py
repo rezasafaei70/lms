@@ -7,6 +7,50 @@ from apps.branches.models import Branch, Classroom
 import uuid
 
 
+class Subject(TimeStampedModel, SoftDeleteModel):
+    """
+    مدل برای تعریف درس‌ها
+    مثال: ریاضی ۱، فیزیک ۲، زیست‌شناسی کنکور
+    """
+    title = models.CharField(_('عنوان درس'), max_length=200, unique=True)
+    code = models.CharField(_('کد درس'), max_length=50, unique=True, null=True, blank=True)
+    description = models.TextField(_('توضیحات'), null=True, blank=True)
+    
+    # پایه تحصیلی مرتبط
+    grade_level = models.ForeignKey(
+        'accounts.GradeLevel',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='subjects',
+        verbose_name=_('پایه تحصیلی')
+    )
+    
+    # قیمت پایه برای تک‌درس
+    base_price = models.DecimalField(
+        _('قیمت پایه تک‌درس'),
+        max_digits=12,
+        decimal_places=0,
+        default=0,
+        help_text='قیمت در صورتی که دانش‌آموز فقط همین درس را بردارد'
+    )
+    
+    # تعداد جلسات استاندارد
+    standard_sessions = models.PositiveIntegerField(
+        _('تعداد جلسات استاندارد'),
+        default=24
+    )
+    
+    is_active = models.BooleanField(_('فعال'), default=True)
+
+    class Meta:
+        db_table = 'subjects'
+        verbose_name = _('درس')
+        verbose_name_plural = _('درس‌ها')
+        ordering = ['title']
+
+    def __str__(self):
+        return self.title
 class Course(TimeStampedModel, SoftDeleteModel):
     """
     Course Model
@@ -26,6 +70,11 @@ class Course(TimeStampedModel, SoftDeleteModel):
         DRAFT = 'draft', _('پیش‌نویس')
         ARCHIVED = 'archived', _('بایگانی شده')
 
+    subjects = models.ManyToManyField(
+        Subject,
+        related_name='courses',
+        verbose_name=_('درس‌های شامل دوره')
+    )
     name = models.CharField(_('نام دوره'), max_length=200)
     code = models.CharField(_('کد دوره'), max_length=50, unique=True)
     slug = models.SlugField(_('اسلاگ'), unique=True, allow_unicode=True)
@@ -166,7 +215,19 @@ class Course(TimeStampedModel, SoftDeleteModel):
 
     def __str__(self):
         return f"{self.name} ({self.get_level_display()})"
-
+    def update_base_price(self):
+        """
+        قیمت پایه دوره را بر اساس جمع قیمت درس‌ها آپدیت می‌کند
+        (می‌تواند با تخفیف پکیج همراه باشد)
+        """
+        total_price = self.subjects.aggregate(
+            total=models.Sum('base_price')
+        )['total'] or 0
+        
+        # اعمال تخفیف برای پکیج (مثلاً ۱۰٪)
+        package_discount = 0.10
+        self.base_price = total_price * (1 - package_discount)
+        self.save()
     @property
     def is_active(self):
         return self.status == self.CourseStatus.ACTIVE

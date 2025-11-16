@@ -89,8 +89,8 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': config('DB_NAME', default='academy_db'),
-        'USER': config('DB_USER', default='postgres'),
-        'PASSWORD': config('DB_PASSWORD', default='postgres'),
+        'USER': config('DB_USER', default='academy_user'),
+        'PASSWORD': config('DB_PASSWORD', default='academy_password'),
         'HOST': config('DB_HOST', default='185.208.175.44'),
         'PORT': config('DB_PORT', default='5432'),
         'ATOMIC_REQUESTS': True,

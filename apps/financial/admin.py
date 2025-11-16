@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    Invoice, InvoiceItem, Payment, DiscountCoupon, CouponUsage,
+    CreditNote, CreditTransaction, Invoice, InvoiceItem, Payment, DiscountCoupon, CouponUsage,
     Installment, Transaction, TeacherPayment
 )
 from django.urls import reverse
@@ -136,3 +136,36 @@ class TeacherPaymentAdmin(admin.ModelAdmin):
     search_fields = ['payment_number', 'teacher__first_name', 'teacher__last_name']
     readonly_fields = ['payment_number', 'total_amount']
     ordering = ['-from_date']
+    
+    
+class CreditTransactionInline(admin.TabularInline):
+    model = CreditTransaction
+    extra = 0
+    fields = ['created_at', 'transaction_type', 'amount', 'balance_after', 'description']
+    readonly_fields = fields
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+@admin.register(CreditNote)
+class CreditNoteAdmin(admin.ModelAdmin):
+    list_display = ['student', 'balance', 'updated_at']
+    search_fields = ['student__first_name', 'student__last_name', 'student__mobile']
+    readonly_fields = ['balance']
+    inlines = [CreditTransactionInline]
+    autocomplete_fields = ['student']
+
+@admin.register(CreditTransaction)
+class CreditTransactionAdmin(admin.ModelAdmin):
+    list_display = [
+        'credit_note', 'transaction_type', 'amount',
+        'balance_after', 'description', 'created_at'
+    ]
+    list_filter = ['transaction_type', 'created_at']
+    search_fields = [
+        'credit_note__student__first_name',
+        'credit_note__student__last_name',
+        'description'
+    ]
+    readonly_fields = ['created_at']

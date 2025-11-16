@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.utils import timezone
 from django.db import transaction
 from .models import (
-    Invoice, InvoiceItem, Payment, DiscountCoupon, CouponUsage,
+    CreditNote, CreditTransaction, Invoice, InvoiceItem, Payment, DiscountCoupon, CouponUsage,
     Installment, Transaction, TeacherPayment
 )
 from apps.accounts.serializers import UserSerializer
@@ -391,3 +391,47 @@ class FinancialReportSerializer(serializers.Serializer):
     total_payments = serializers.IntegerField()
     overdue_invoices = serializers.IntegerField()
     total_outstanding = serializers.DecimalField(max_digits=12, decimal_places=0)
+    
+    
+class CreditTransactionSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر برای تاریخچه تراکنش‌های اعتبار
+    """
+    transaction_type_display = serializers.CharField(
+        source='get_transaction_type_display',
+        read_only=True
+    )
+    created_by_name = serializers.CharField(
+        source='created_by.get_full_name',
+        read_only=True
+    )
+    source_invoice_number = serializers.CharField(
+        source='source_invoice.invoice_number',
+        read_only=True
+    )
+
+    class Meta:
+        model = CreditTransaction
+        fields = [
+            'id', 'transaction_type', 'transaction_type_display',
+            'amount', 'balance_after', 'description',
+            'source_invoice', 'source_invoice_number',
+            'created_by', 'created_by_name',
+            'created_at'
+        ]
+        read_only_fields = fields
+
+
+class CreditNoteSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر برای نمایش اعتبار و تاریخچه آن
+    """
+    student_details = UserSerializer(source='student', read_only=True)
+    transactions = CreditTransactionSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = CreditNote
+        fields = [
+            'id', 'student', 'student_details', 'balance', 'transactions', 'updated_at'
+        ]
+        read_only_fields = fields

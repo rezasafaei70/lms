@@ -247,7 +247,8 @@ class Payment(TimeStampedModel):
         ONLINE = 'online', _('پرداخت آنلاین')
         CHEQUE = 'cheque', _('چک')
         INSTALLMENT = 'installment', _('اقساط')
-
+        CREDIT = 'credit', _('اعتبار داخلی')
+        
     class PaymentStatus(models.TextChoices):
         PENDING = 'pending', _('در انتظار')
         PROCESSING = 'processing', _('در حال پردازش')
@@ -932,3 +933,152 @@ class TeacherPayment(TimeStampedModel):
         self.total_hours = total_hours
         self.base_amount = self.total_hours * float(self.hourly_rate)
         self.save()
+        
+class CreditNote(TimeStampedModel):
+    """
+    مدل برای مدیریت اعتبار دانش‌آموزان (کیف پول)
+    """
+    student = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='credit_note',
+        verbose_name=_('دانش‌آموز')
+    )
+    
+    balance = models.DecimalField(
+        _('موجودی اعتبار'),
+        max_digits=12,
+        decimal_places=0,
+        default=0
+    )
+
+    class Meta:
+        db_table = 'credit_notes'
+        verbose_name = _('اعتبار دانش‌آموز')
+        verbose_name_plural = _('اعتبارات دانش‌آموزان')
+
+    def __str__(self):
+        return f"اعتبار {self.student.get_full_name()}: {self.balance:,}"
+
+class CreditTransaction(TimeStampedModel):
+    """
+    تاریخچه تراکنش‌های اعتبار
+    """
+    class TransactionType(models.TextChoices):
+        REFUND = 'refund', _('بازگشت وجه')
+        PAYMENT = 'payment', _('استفاده برای پرداخت')
+        ADJUSTMENT = 'adjustment', _('تعدیل دستی')
+
+    credit_note = models.ForeignKey(
+        CreditNote,
+        on_delete=models.CASCADE,
+        related_name='transactions',
+        verbose_name=_('اعتبار')
+    )
+    
+    transaction_type = models.CharField(
+        _('نوع تراکنش'),
+        max_length=20,
+        choices=TransactionType.choices
+    )
+    
+    amount = models.DecimalField(
+        _('مبلغ'),
+        max_digits=12,
+        decimal_places=0
+    )
+    
+    balance_after = models.DecimalField(
+        _('موجودی بعد از تراکنش'),
+        max_digits=12,
+        decimal_places=0
+    )
+    
+    description = models.CharField(_('توضیحات'), max_length=255)
+    
+    # منبع تراکنش
+    source_invoice = models.ForeignKey(
+        Invoice,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name=_('فاکتور مبدا/مقصد')
+    )
+    
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        verbose_name=_('ایجاد کننده')
+    )
+
+    class Meta:
+        db_table = 'credit_transactions'
+        verbose_name = _('تراکنش اعتبار')
+        verbose_name_plural = _('تراکنش‌های اعتبار')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_transaction_type_display()} - {self.amount}"
+
+
+class RefundRequest(TimeStampedModel):
+    """
+    درخواست بازگشت وجه (برای واریز به حساب)
+    """
+    class RequestStatus(models.TextChoices):
+        PENDING = 'pending', _('در انتظار')
+        PROCESSING = 'processing', _('در حال پردازش')
+        COMPLETED = 'completed', _('انجام شده')
+        REJECTED = 'rejected', _('رد شده')
+
+    student = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='refund_requests',
+        verbose_name=_('دانش‌آموز')
+    )
+    
+    amount = models.DecimalField(
+        _('مبلغ درخواستی'),
+        max_digits=12,
+        decimal_places=0
+    )
+    
+    reason = models.TextField(_('دلیل درخواست'))
+    
+    # اطلاعات حساب بانکی
+    bank_name = models.CharField(_('نام بانک'), max_length=100)
+    card_number = models.CharField(_('شماره کارت'), max_length=16)
+    iban = models.CharField(_('شماره شبا'), max_length=26, unique=True)
+    
+    status = models.CharField(
+        _('وضعیت'),
+        max_length=20,
+        choices=RequestStatus.choices,
+        default=RequestStatus.PENDING
+    )
+    
+    processed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='processed_refunds',
+        verbose_name=_('پردازش کننده')
+    )
+    processed_at = models.DateTimeField(_('تاریخ پردازش'), null=True, blank=True)
+    transaction_receipt = models.FileField(
+        _('رسید تراکنش'),
+        upload_to='refunds/',
+        null=True,
+        blank=True
+    )
+    
+    admin_notes = models.TextField(_('یادداشت مدیر'), null=True, blank=True)
+
+    class Meta:
+        db_table = 'refund_requests'
+        verbose_name = _('درخواست بازگشت وجه')
+        verbose_name_plural = _('درخواست‌های بازگشت وجه')
+        ordering = ['-created_at']

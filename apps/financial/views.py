@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -8,12 +9,14 @@ from django.utils import timezone
 from django.db.models import Q, Sum, Count
 from django.db import transaction as db_transaction
 
+from apps.financial.services import add_credit_to_student, use_credit_for_payment
+
 from .models import (
-    Invoice, InvoiceItem, Payment, DiscountCoupon, CouponUsage,
+    CreditNote, Invoice, InvoiceItem, Payment, DiscountCoupon, CouponUsage,
     Installment, Transaction, TeacherPayment
 )
 from .serializers import (
-    InvoiceSerializer, InvoiceListSerializer, CreateInvoiceSerializer,
+    CreditNoteSerializer, CreditTransactionSerializer, InvoiceSerializer, InvoiceListSerializer, CreateInvoiceSerializer,
     PaymentSerializer, VerifyPaymentSerializer,
     DiscountCouponSerializer, ValidateCouponSerializer,
     InstallmentSerializer, CreateInstallmentPlanSerializer,
@@ -669,3 +672,150 @@ class PaymentCallbackView(APIView):
             payment.status = Payment.PaymentStatus.FAILED
             payment.save()
             return Response({'error': 'پرداخت ناموفق بود'}, status=status.HTTP_400_BAD_REQUEST)
+        
+class CreditNoteViewSet(viewsets.GenericViewSet):
+    """
+    مدیریت کیف پول و اعتبار دانش‌آموزان
+    """
+    queryset = CreditNote.objects.all()
+    serializer_class = CreditNoteSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = super().get_queryset().select_related('student').prefetch_related('transactions')
+        
+        # دانش‌آموزان فقط کیف پول خود را می‌بینند
+        if user.role == user.UserRole.STUDENT:
+            queryset = queryset.filter(student=user)
+        # مدیران می‌توانند همه را ببینند
+        elif user.role not in [user.UserRole.SUPER_ADMIN, user.UserRole.BRANCH_MANAGER]:
+            queryset = queryset.none()
+        
+        return queryset
+
+    @action(detail=False, methods=['get'], url_path='my-credit')
+    def my_credit_details(self, request):
+        """
+        دریافت اطلاعات کامل کیف پول کاربر جاری
+        GET /api/v1/financial/credit/my-credit/
+        """
+        credit_note, created = CreditNote.objects.get_or_create(student=request.user)
+        serializer = self.get_serializer(credit_note)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='my-balance')
+    def my_balance(self, request):
+        """
+        دریافت موجودی فعلی اعتبار (سریع)
+        GET /api/v1/financial/credit/my-balance/
+        """
+        credit_note, created = CreditNote.objects.get_or_create(student=request.user)
+        return Response({'balance': credit_note.balance})
+
+    @action(detail=False, methods=['get'], url_path='my-transactions')
+    def my_transactions(self, request):
+        """
+        دریافت تاریخچه تراکنش‌های اعتبار کاربر جاری
+        GET /api/v1/financial/credit/my-transactions/
+        """
+        credit_note, created = CreditNote.objects.get_or_create(student=request.user)
+        
+        # استفاده از pagination
+        paginator = StandardResultsSetPagination()
+        transactions = credit_note.transactions.all().order_by('-created_at')
+        page = paginator.paginate_queryset(transactions, request)
+        
+        serializer = CreditTransactionSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='pay-with-credit', permission_classes=[IsStudent])
+    def pay_with_credit(self, request):
+        """
+        پرداخت بخشی یا تمام یک فاکتور با استفاده از اعتبار
+        POST /api/v1/financial/credit/pay-with-credit/
+        {
+            "invoice_id": "uuid-of-invoice",
+            "amount": 50000  // مبلغی که می‌خواهد از اعتبار پرداخت کند
+        }
+        """
+        invoice_id = request.data.get('invoice_id')
+        try:
+            amount = Decimal(request.data.get('amount'))
+        except (TypeError, ValueError):
+            return Response({'error': 'مبلغ نامعتبر است.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not invoice_id or amount <= 0:
+            return Response({'error': 'شناسه فاکتور و مبلغ الزامی است.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            invoice = Invoice.objects.get(id=invoice_id, student=request.user)
+        except Invoice.DoesNotExist:
+            return Response({'error': 'فاکتور یافت نشد.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        if invoice.is_paid:
+            return Response({'error': 'این فاکتور قبلاً پرداخت شده است.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # اگر مبلغ درخواستی بیشتر از باقی‌مانده فاکتور بود، آن را محدود کن
+        if amount > invoice.remaining_amount:
+            amount = invoice.remaining_amount
+            
+        try:
+            # فراخوانی سرویس برای انجام عملیات
+            use_credit_for_payment(
+                student=request.user, 
+                amount=amount, 
+                invoice=invoice
+            )
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # دریافت مجدد اطلاعات بروز شده
+        invoice.refresh_from_db()
+        credit_note = CreditNote.objects.get(student=request.user)
+        
+        return Response({
+            'message': f'مبلغ {amount:,} تومان با موفقیت از اعتبار شما برای پرداخت فاکتور استفاده شد.',
+            'invoice_status': invoice.status,
+            'invoice_remaining_amount': invoice.remaining_amount,
+            'new_credit_balance': credit_note.balance
+        })
+
+    @action(detail=False, methods=['post'], url_path='add-manual-credit', permission_classes=[IsSuperAdmin])
+    def add_manual_credit(self, request):
+        """
+        اضافه کردن اعتبار به صورت دستی توسط ادمین
+        POST /api/v1/financial/credit/add-manual-credit/
+        {
+            "student_id": "uuid-of-student",
+            "amount": 100000,
+            "description": "پاداش دانش‌آموز ممتاز"
+        }
+        """
+        student_id = request.data.get('student_id')
+        amount = Decimal(request.data.get('amount', 0))
+        description = request.data.get('description')
+
+        if not all([student_id, amount > 0, description]):
+            return Response({'error': 'اطلاعات کامل نیست.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        from apps.accounts.models import User
+        try:
+            student = User.objects.get(id=student_id, role=User.UserRole.STUDENT)
+        except User.DoesNotExist:
+            return Response({'error': 'دانش‌آموز یافت نشد.'}, status=status.HTTP_404_NOT_FOUND)
+            
+        try:
+            credit_note = add_credit_to_student(
+                student=student,
+                amount=amount,
+                description=description,
+                created_by=request.user
+            )
+        except ValueError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            
+        return Response({
+            'message': f'مبلغ {amount:,} تومان با موفقیت به اعتبار {student.get_full_name()} اضافه شد.',
+            'new_balance': credit_note.balance
+        })

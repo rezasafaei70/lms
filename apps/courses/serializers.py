@@ -3,11 +3,25 @@ from django.utils import timezone
 from django.db.models import Avg, Count
 
 from apps.lms.serializers import AssignmentSerializer, CourseMaterialSerializer
-from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Term, TeacherReview
+from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Subject, Term, TeacherReview
 from apps.accounts.serializers import UserSerializer
 from apps.branches.serializers import BranchSerializer, ClassroomSerializer
 from django.core.validators import MinValueValidator, MaxValueValidator
 
+
+
+class SubjectSerializer(serializers.ModelSerializer):
+    """
+    سریالایزر برای مدل درس
+    """
+    grade_level_name = serializers.CharField(source='grade_level.name', read_only=True)
+    
+    class Meta:
+        model = Subject
+        fields = [
+            'id', 'title', 'code', 'description', 'grade_level',
+            'grade_level_name', 'base_price', 'standard_sessions', 'is_active'
+        ]
 class CourseSerializer(serializers.ModelSerializer):
     """
     Course Serializer
@@ -17,7 +31,7 @@ class CourseSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     is_active = serializers.BooleanField(read_only=True)
     active_classes_count = serializers.SerializerMethodField()
-    
+    subjects_details = SubjectSerializer(source='subjects', many=True, read_only=True)
     class Meta:
         model = Course
         fields = '__all__'
@@ -262,6 +276,7 @@ class TeacherReviewSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('شما قبلاً نظر خود را ثبت کرده‌اید')
 
         return attrs
+
 
 
 class CourseStatisticsSerializer(serializers.Serializer):

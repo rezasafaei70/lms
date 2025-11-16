@@ -209,6 +209,45 @@ class OTP(TimeStampedModel):
             return False
         return True
 
+class GradeLevel(TimeStampedModel):
+    """
+    مدل برای تعریف پایه‌های تحصیلی
+    مثال: اول ابتدایی، دهم تجربی، پیش‌دانشگاهی
+    """
+    name = models.CharField(_('نام پایه'), max_length=100, unique=True)
+    order = models.PositiveIntegerField(
+        _('ترتیب'),
+        default=0,
+        help_text='برای مرتب‌سازی پایه‌ها (مثلاً اول ابتدایی = 1)'
+    )
+    
+    # برای گروه‌بندی (اختیاری)
+    class GradeStage(models.TextChoices):
+        PRESCHOOL = 'preschool', _('پیش‌دبستانی')
+        ELEMENTARY = 'elementary', _('ابتدایی')
+        MIDDLE_SCHOOL = 'middle_school', _('متوسطه اول')
+        HIGH_SCHOOL = 'high_school', _('متوسطه دوم')
+        UNIVERSITY = 'university', _('دانشگاهی')
+        OTHER = 'other', _('سایر')
+
+    stage = models.CharField(
+        _('مقطع تحصیلی'),
+        max_length=20,
+        choices=GradeStage.choices,
+        default=GradeStage.OTHER,
+        db_index=True
+    )
+    
+    is_active = models.BooleanField(_('فعال'), default=True)
+    
+    class Meta:
+        db_table = 'grade_levels'
+        verbose_name = _('پایه تحصیلی')
+        verbose_name_plural = _('پایه‌های تحصیلی')
+        ordering = ['order']
+
+    def __str__(self):
+        return self.name
 
 class StudentProfile(TimeStampedModel):
     """
@@ -250,7 +289,14 @@ class StudentProfile(TimeStampedModel):
         null=True,
         blank=True
     )
-    
+    grade_level = models.ForeignKey(
+        GradeLevel,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='students',
+        verbose_name=_('پایه تحصیلی')
+    )
     # Guardian Info (for minors)
     guardian_name = models.CharField(_('نام ولی'), max_length=100, null=True, blank=True)
     guardian_mobile = models.CharField(_('موبایل ولی'), max_length=11, null=True, blank=True)
