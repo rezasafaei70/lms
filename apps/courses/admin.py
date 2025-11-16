@@ -1,7 +1,10 @@
 from django.contrib import admin
-from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Term, TeacherReview
+from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Subject, Term, TeacherReview
 from django.utils import timezone
 
+@admin.register(Subject)
+class SubjectAdmin(admin.ModelAdmin):
+    list_display = ['title']
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
     list_display = [

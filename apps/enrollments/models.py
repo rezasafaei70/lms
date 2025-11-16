@@ -4,7 +4,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 from apps.core.models import TimeStampedModel, SoftDeleteModel
 from apps.accounts.models import User
-from apps.courses.models import Course, Class, Term
+from apps.courses.models import Course, Class, Subject, Term
 from apps.branches.models import Branch
 import uuid
 
@@ -507,8 +507,7 @@ class EnrollmentTransfer(TimeStampedModel):
 
 class AnnualRegistration(TimeStampedModel):
     """
-    Annual Registration (ثبت‌نام سالانه)
-    ✅ نسخه اصلاح شده با فیلدهای ضروری
+    ثبت‌نام سالانه دانش‌آموز (برنامه آموزشی سال)
     """
     class RegistrationStatus(models.TextChoices):
         DRAFT = 'draft', _('پیش‌نویس')
@@ -525,39 +524,24 @@ class AnnualRegistration(TimeStampedModel):
         verbose_name=_('دانش‌آموز'),
         limit_choices_to={'role': User.UserRole.STUDENT}
     )
-    
     branch = models.ForeignKey(
-        'branches.Branch',
+        Branch,
         on_delete=models.PROTECT,
         related_name='annual_registrations',
         verbose_name=_('شعبه')
     )
-    
-    # Academic Year
     academic_year = models.CharField(
         _('سال تحصیلی'),
         max_length=20,
         help_text='مثال: 1403-1404'
     )
-    
-    # ✅ تاریخ ثبت‌نام رسمی
     registration_date = models.DateField(
         _('تاریخ ثبت‌نام'),
         auto_now_add=True,
         help_text='تاریخ رسمی ثبت‌نام دانش‌آموز'
     )
-    
-    # Academic Period Dates
-    start_date = models.DateField(
-        _('تاریخ شروع سال تحصیلی'),
-        help_text='معمولاً 1 مهر'
-    )
-    end_date = models.DateField(
-        _('تاریخ پایان سال تحصیلی'),
-        help_text='معمولاً 31 شهریور'
-    )
-    
-    # Status
+    start_date = models.DateField(_('تاریخ شروع سال تحصیلی'))
+    end_date = models.DateField(_('تاریخ پایان سال تحصیلی'))
     status = models.CharField(
         _('وضعیت'),
         max_length=25,
@@ -565,8 +549,6 @@ class AnnualRegistration(TimeStampedModel):
         default=RegistrationStatus.DRAFT,
         db_index=True
     )
-    
-    # ✅ ارتباط با Invoice
     invoice = models.OneToOneField(
         'financial.Invoice',
         on_delete=models.SET_NULL,
@@ -575,8 +557,6 @@ class AnnualRegistration(TimeStampedModel):
         related_name='annual_registration_source',
         verbose_name=_('فاکتور')
     )
-    
-    # ✅ کش پرداخت (اختیاری - برای کوئری سریع)
     is_paid_cached = models.BooleanField(
         _('پرداخت شده'),
         default=False,
@@ -584,46 +564,19 @@ class AnnualRegistration(TimeStampedModel):
         editable=False,
         help_text='این فیلد خودکار از Invoice بروز می‌شود'
     )
-    
-    # Documents
+    selected_subjects = models.ManyToManyField(
+        Subject,
+        through='AnnualRegistrationSubject',
+        related_name='annual_registrations',
+        verbose_name=_('درس‌های انتخابی سالانه')
+    )
     documents_submitted = models.BooleanField(_('مدارک ارسال شده'), default=False)
-    documents_submitted_at = models.DateTimeField(
-        _('تاریخ ارسال مدارک'),
-        null=True,
-        blank=True
-    )
-    
     documents_verified = models.BooleanField(_('مدارک تایید شده'), default=False)
-    verified_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='verified_annual_registrations',
-        verbose_name=_('تایید کننده مدارک')
-    )
-    verified_at = models.DateTimeField(_('تاریخ تایید مدارک'), null=True, blank=True)
-    
-    # Activation
-    activated_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='activated_registrations',
-        verbose_name=_('فعال کننده')
-    )
-    activated_at = models.DateTimeField(_('تاریخ فعال‌سازی'), null=True, blank=True)
-    
-    # Settings snapshot
     registration_fee_amount = models.DecimalField(
-        _('مبلغ شهریه (ثبت شده)'),
+        _('مبلغ شهریه ثابت (ثبت شده)'),
         max_digits=12,
-        decimal_places=0,
-        help_text='مبلغی که هنگام ثبت‌نام تعیین شده - یک snapshot از تنظیمات'
+        decimal_places=0
     )
-    
-    # Notes
     notes = models.TextField(_('یادداشت‌ها'), null=True, blank=True)
     cancellation_reason = models.TextField(_('دلیل لغو'), null=True, blank=True)
 
@@ -633,144 +586,105 @@ class AnnualRegistration(TimeStampedModel):
         verbose_name_plural = _('ثبت‌نام‌های سالانه')
         ordering = ['-registration_date']
         unique_together = ['student', 'academic_year']
-        indexes = [
-            models.Index(fields=['student', 'status']),
-            models.Index(fields=['academic_year']),
-            models.Index(fields=['registration_date']),
-            models.Index(fields=['is_paid_cached', 'status']),  # برای کوئری‌های ترکیبی
-        ]
 
     def __str__(self):
         return f"{self.student.get_full_name()} - {self.academic_year}"
 
-    # =============== Properties ===============
-    
     @property
     def is_paid(self):
-        """
-        بررسی پرداخت از طریق Invoice
-        برای نمایش استفاده می‌شود
-        """
-        if not self.invoice:
-            return False
+        if not self.invoice: return False
         return self.invoice.is_paid
 
     @property
-    def payment_status(self):
-        """وضعیت پرداخت از Invoice"""
-        if not self.invoice:
-            return 'no_invoice'
-        return self.invoice.status
+    def is_active(self):
+        if self.status != self.RegistrationStatus.ACTIVE: return False
+        return self.start_date <= timezone.now().date() <= self.end_date
 
-    @property
-    def total_amount(self):
-        """مبلغ کل از Invoice"""
-        if not self.invoice:
-            return self.registration_fee_amount
-        return self.invoice.total_amount
-
-    @property
-    def paid_amount(self):
-        """مبلغ پرداخت شده از Invoice"""
-        if not self.invoice:
-            return 0
-        return self.invoice.paid_amount
-
-    @property
-    def remaining_amount(self):
-        """مبلغ باقی‌مانده"""
-        return self.total_amount - self.paid_amount
-
-    @property
-    def is_active_now(self):
-        """
-        آیا همین الان فعال است؟
-        """
-        from django.utils import timezone
-        if self.status != self.RegistrationStatus.ACTIVE:
-            return False
-        today = timezone.now().date()
-        return self.start_date <= today <= self.end_date
-
-    @property
-    def can_activate(self):
-        """
-        آیا قابل فعال‌سازی است؟
-        """
-        return (
-            self.is_paid and
-            self.documents_verified and
-            self.status == self.RegistrationStatus.PENDING_VERIFICATION
-        )
-
-    @property
-    def days_until_expiry(self):
-        """
-        چند روز تا انقضا باقی مانده؟
-        """
-        from django.utils import timezone
-        if self.status != self.RegistrationStatus.ACTIVE:
-            return None
-        today = timezone.now().date()
-        if today > self.end_date:
-            return 0
-        return (self.end_date - today).days
-
-    # =============== Methods ===============
-    
     def update_payment_cache(self):
-        """
-        بروزرسانی کش پرداخت
-        این متد توسط signal فراخوانی می‌شود
-        """
         if self.invoice:
             self.is_paid_cached = self.invoice.is_paid
             self.save(update_fields=['is_paid_cached'])
+            
+class AnnualRegistrationSubject(TimeStampedModel):
+    """
+    درس‌های انتخاب شده در ثبت‌نام سالانه
+    """
+    annual_registration = models.ForeignKey(AnnualRegistration, on_delete=models.CASCADE, verbose_name=_('ثبت‌نام سالانه'))
+    subject = models.ForeignKey(Subject, on_delete=models.PROTECT, verbose_name=_('درس'))
+    price_at_registration = models.DecimalField(_('قیمت درس در زمان ثبت‌نام'), max_digits=12, decimal_places=0)
+    
+    class CourseStatus(models.TextChoices):
+        PLANNED = 'planned', _('برنامه‌ریزی شده')
+        ENROLLED_IN_CLASS = 'enrolled_in_class', _('ثبت‌نام شده در کلاس')
+        COMPLETED = 'completed', _('تکمیل شده')
+        DROPPED = 'dropped', _('حذف شده')
+    
+    status = models.CharField(_('وضعیت'), max_length=20, choices=CourseStatus.choices, default=CourseStatus.PLANNED)
+    enrollment = models.ForeignKey('Enrollment', on_delete=models.SET_NULL, null=True, blank=True, related_name='annual_subject', verbose_name=_('ثبت‌نام کلاس'))
+    
+    class Meta:
+        db_table = 'annual_registration_subjects'
+        verbose_name = _('درس ثبت‌نام سالانه')
+        verbose_name_plural = _('دروس ثبت‌نام سالانه')
+        unique_together = ['annual_registration', 'subject']
 
-    def submit_documents(self):
-        """
-        ثبت ارسال مدارک
-        """
-        from django.utils import timezone
-        self.documents_submitted = True
-        self.documents_submitted_at = timezone.now()
-        self.save(update_fields=['documents_submitted', 'documents_submitted_at'])
+class AnnualRegistrationCourse(TimeStampedModel):
+    """
+    مدل واسط برای اتصال ثبت‌نام سالانه به دروس انتخابی
+    """
+    annual_registration = models.ForeignKey(
+        AnnualRegistration,
+        on_delete=models.CASCADE,
+        verbose_name=_('ثبت‌نام سالانه')
+    )
+    
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.PROTECT, # از حذف دوره جلوگیری می‌کند
+        verbose_name=_('دوره')
+    )
+    
+    # ✅ قیمت دوره در لحظه ثبت‌نام (Snapshot)
+    price_at_registration = models.DecimalField(
+        _('قیمت دوره در زمان ثبت‌نام'),
+        max_digits=12,
+        decimal_places=0,
+        help_text='این قیمت برای صدور فاکتور استفاده می‌شود'
+    )
+    
+    # ✅ وضعیت دوره در برنامه سالانه دانش‌آموز
+    class CourseStatus(models.TextChoices):
+        PLANNED = 'planned', _('برنامه‌ریزی شده')
+        ENROLLED_IN_CLASS = 'enrolled_in_class', _('در کلاس ثبت‌نام شده')
+        COMPLETED = 'completed', _('تکمیل شده')
+        DROPPED = 'dropped', _('حذف شده')
 
-    def check_and_activate(self, activated_by=None):
-        """
-        بررسی شرایط و فعال‌سازی خودکار
-        """
-        if self.can_activate:
-            from django.utils import timezone
-            self.status = self.RegistrationStatus.ACTIVE
-            self.activated_by = activated_by
-            self.activated_at = timezone.now()
-            self.save()
-            return True
-        return False
+    status = models.CharField(
+        _('وضعیت دوره'),
+        max_length=20,
+        choices=CourseStatus.choices,
+        default=CourseStatus.PLANNED
+    )
+    
+    # لینک به ثبت‌نام کلاس واقعی (وقتی انجام شد)
+    enrollment = models.ForeignKey(
+        'Enrollment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='annual_course',
+        verbose_name=_('ثبت‌نام کلاس')
+    )
 
-    def expire_if_needed(self):
-        """
-        اگر تاریخ گذشته، منقضی کن
-        این متد توسط Celery Task روزانه اجرا می‌شود
-        """
-        from django.utils import timezone
-        if (
-            self.status == self.RegistrationStatus.ACTIVE and
-            timezone.now().date() > self.end_date
-        ):
-            self.status = self.RegistrationStatus.EXPIRED
-            self.save(update_fields=['status'])
-            return True
-        return False
+    class Meta:
+        db_table = 'annual_registration_courses'
+        verbose_name = _('درس ثبت‌نام سالانه')
+        verbose_name_plural = _('دروس ثبت‌نام سالانه')
+        unique_together = ['annual_registration', 'course']
 
-    def cancel(self, reason=None):
-        """
-        لغو ثبت‌نام
-        """
-        self.status = self.RegistrationStatus.CANCELLED
-        self.cancellation_reason = reason
-        self.save()
+    def __str__(self):
+        return f"{self.annual_registration.student.get_full_name()} - {self.course.name}"
+
 class EnrollmentDocument(TimeStampedModel):
     """
     Enrollment Documents

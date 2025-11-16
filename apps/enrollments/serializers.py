@@ -2,11 +2,11 @@ from rest_framework import serializers
 from django.utils import timezone
 from django.db import transaction
 from .models import (
-    Enrollment, PlacementTest, WaitingList, EnrollmentTransfer,
+    AnnualRegistrationSubject, Enrollment, PlacementTest, WaitingList, EnrollmentTransfer,
     AnnualRegistration, EnrollmentDocument
 )
 from apps.accounts.serializers import UserSerializer
-from apps.courses.serializers import ClassSerializer, ClassListSerializer, CourseListSerializer
+from apps.courses.serializers import ClassSerializer, ClassListSerializer, CourseListSerializer, SubjectSerializer
 
 
 class EnrollmentDocumentSerializer(serializers.ModelSerializer):
@@ -225,7 +225,13 @@ class EnrollmentTransferSerializer(serializers.ModelSerializer):
         attrs['price_difference'] = to_class.price - from_class.price
         
         return attrs
+class AnnualRegistrationSubjectSerializer(serializers.ModelSerializer):
+    subject_details = SubjectSerializer(source='subject', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
 
+    class Meta:
+        model = AnnualRegistrationSubject
+        fields = ['id', 'subject', 'subject_details', 'price_at_registration', 'status', 'status_display', 'enrollment']
 
 class AnnualRegistrationSerializer(serializers.ModelSerializer):
     """
@@ -234,7 +240,7 @@ class AnnualRegistrationSerializer(serializers.ModelSerializer):
     student_details = UserSerializer(source='student', read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    
+    selected_subjects_details = AnnualRegistrationSubjectSerializer(source='annualregistrationsubject_set', many=True, read_only=True)
     # Properties از مدل
     is_paid = serializers.BooleanField(read_only=True)
     is_active_now = serializers.BooleanField(read_only=True)
@@ -250,23 +256,15 @@ class AnnualRegistrationSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = AnnualRegistration
-        fields = [
-            'id', 'student', 'student_details', 'branch', 'branch_name',
-            'academic_year', 'registration_date', 'start_date', 'end_date',
-            'status', 'status_display',
-            'invoice', 'invoice_id',
-            'is_paid', 'is_paid_cached', 'payment_status',
-            'total_amount', 'paid_amount', 'remaining_amount',
-            'registration_fee_amount',
-            'documents_submitted', 'documents_submitted_at',
-            'documents_verified', 'verified_by', 'verified_at',
-            'activated_by', 'activated_at',
-            'is_active_now', 'days_until_expiry', 'can_activate',
-            'notes', 'cancellation_reason',
-            'created_at', 'updated_at'
-        ]
+        fields = '__all__'
         read_only_fields = [
             'id', 'created_at', 'updated_at', 'registration_date',
             'invoice', 'is_paid_cached', 'verified_by', 'verified_at',
             'activated_by', 'activated_at'
         ]
+
+class CreateAnnualRegistrationSerializer(serializers.Serializer):
+    branch = serializers.UUIDField(required=True)
+    academic_year = serializers.CharField(max_length=20, required=False)
+    selected_subject_ids = serializers.ListField(child=serializers.UUIDField(), min_length=1, allow_empty=False)
+    discount_code = serializers.CharField(required=False, allow_blank=True)

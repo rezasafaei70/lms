@@ -1,10 +1,16 @@
 from django.contrib import admin
 from .models import (
-    Enrollment, PlacementTest, WaitingList, EnrollmentTransfer,
+    AnnualRegistrationSubject, Enrollment, PlacementTest, WaitingList, EnrollmentTransfer,
     AnnualRegistration, EnrollmentDocument
 )
 
-
+class AnnualRegistrationSubjectInline(admin.TabularInline):
+    model = AnnualRegistrationSubject
+    extra = 1
+    fields = ['subject', 'price_at_registration', 'status']
+    readonly_fields = ['price_at_registration']
+    
+    
 @admin.register(Enrollment)
 class EnrollmentAdmin(admin.ModelAdmin):
     list_display = [
@@ -65,8 +71,8 @@ class AnnualRegistrationAdmin(admin.ModelAdmin):
     list_filter = ['status', 'academic_year', 'documents_verified']
     search_fields = ['student__first_name', 'student__last_name', 'academic_year']
     ordering = ['-registration_date']
-
-
+    inlines = [AnnualRegistrationSubjectInline]
+    
 @admin.register(EnrollmentDocument)
 class EnrollmentDocumentAdmin(admin.ModelAdmin):
     list_display = [
