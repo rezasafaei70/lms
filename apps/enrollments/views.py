@@ -102,7 +102,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             enrollment = Enrollment.objects.create(
                 student=student,
                 class_obj=class_obj,
-                status=Enrollment.EnrollmentStatus.PENDING_PAYMENT,
+                status=Enrollment.EnrollmentStatus.PENDING,
                 total_amount=class_obj.price, # قیمت پایه
                 # سایر فیلدها...
             )
