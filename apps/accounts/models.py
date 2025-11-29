@@ -10,17 +10,17 @@ class UserManager(BaseUserManager):
     """
     Custom user manager
     """
-    def create_user(self, mobile, password=None, **extra_fields):
-        if not mobile:
-            raise ValueError('شماره موبایل الزامی است')
+    def create_user(self, national_code, password=None, **extra_fields):
+        if not national_code:
+            raise ValueError('شماره ملی الزامی است')
         
-        user = self.model(mobile=mobile, **extra_fields)
+        user = self.model(national_code=national_code, **extra_fields)
         if password:
             user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, mobile, password=None, **extra_fields):
+    def create_superuser(self, national_code, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_active', True)
@@ -30,7 +30,7 @@ class UserManager(BaseUserManager):
         if extra_fields.get('is_superuser') is not True:
             raise ValueError('Superuser must have is_superuser=True.')
 
-        return self.create_user(mobile, password, **extra_fields)
+        return self.create_user(national_code, password, **extra_fields)
 
 
 class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel, SoftDeleteModel):
@@ -61,7 +61,6 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel, SoftDeleteModel
     mobile = models.CharField(
         _('شماره موبایل'),
         max_length=11,
-        unique=True,
         validators=[phone_regex]
     )
     email = models.EmailField(_('ایمیل'), unique=True, null=True, blank=True)
@@ -119,7 +118,7 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel, SoftDeleteModel
 
     objects = UserManager()
 
-    USERNAME_FIELD = 'mobile'
+    USERNAME_FIELD = 'national_code'
     REQUIRED_FIELDS = ['first_name', 'last_name']
 
     class Meta:

@@ -8,8 +8,8 @@ from django.db.models import Q, Count, Avg, F
 
 from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Term, TeacherReview
 from .serializers import (
-    CourseSerializer, CourseListSerializer, ClassSerializer,
-    ClassListSerializer, ClassSessionSerializer, PrivateClassPricingSerializer, TermSerializer,
+    ApprovePrivateClassSerializer, CourseSerializer, CourseListSerializer, ClassSerializer,
+    ClassListSerializer, ClassSessionSerializer, CreateClassFromRequestSerializer, PrivateClassPricingSerializer, PrivateClassRequestListSerializer, PrivateClassRequestSerializer, TermSerializer,
     TeacherReviewSerializer, CourseStatisticsSerializer
 )
 from utils.permissions import IsSuperAdmin, IsTeacher, IsStudent

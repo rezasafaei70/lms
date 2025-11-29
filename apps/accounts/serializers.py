@@ -110,16 +110,16 @@ class SendOTPSerializer(serializers.Serializer):
     """
     Send OTP Serializer
     """
-    mobile = serializers.CharField(max_length=11, validators=[validate_iranian_mobile])
+    national_code = serializers.CharField(max_length=11)
     purpose = serializers.ChoiceField(
         choices=OTP.OTPPurpose.choices,
         default=OTP.OTPPurpose.LOGIN
     )
 
-    def validate_mobile(self, value):
-        # Check cooldown period
+    def validate_national_code(self, value):
+        user = User.objects.filter(national_code=value).first()
         recent_otp = OTP.objects.filter(
-            mobile=value,
+            mobile=user.mobile,
             created_at__gte=timezone.now() - timedelta(seconds=settings.OTP_COOLDOWN)
         ).first()
         
@@ -134,7 +134,7 @@ class SendOTPSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
-        mobile = validated_data['mobile']
+        national_code = validated_data['national_code']
         purpose = validated_data['purpose']
         
         # Generate OTP code
@@ -144,10 +144,11 @@ class SendOTPSerializer(serializers.Serializer):
         request = self.context.get('request')
         ip_address = request.META.get('REMOTE_ADDR') if request else None
         user_agent = request.META.get('HTTP_USER_AGENT') if request else None
-        
+        user = User.objects.filter(national_code=national_code).first()
+        mobile = user.mobile
         # Create OTP
         otp = OTP.objects.create(
-            mobile=mobile,
+            mobile=user.mobile,
             code=code,
             purpose=purpose,
             expires_at=timezone.now() + timedelta(seconds=settings.OTP_EXPIRE_TIME),
@@ -166,17 +167,17 @@ class VerifyOTPSerializer(serializers.Serializer):
     """
     Verify OTP Serializer
     """
-    mobile = serializers.CharField(max_length=11, validators=[validate_iranian_mobile])
+    national_code = serializers.CharField(max_length=11)
     code = serializers.CharField(max_length=6)
 
     def validate(self, attrs):
-        mobile = attrs.get('mobile')
+        national_code = attrs.get('national_code')
         code = attrs.get('code')
-        
+        user = User.objects.filter(national_code=national_code).first()
         # Find OTP
         try:
             otp = OTP.objects.filter(
-                mobile=mobile,
+                mobile=user.mobile,
                 code=code,
                 is_used=False,
                 is_expired=False
@@ -229,7 +230,7 @@ class LoginSerializer(serializers.Serializer):
     """
     Login with OTP Serializer
     """
-    mobile = serializers.CharField(max_length=11)
+    national_code = serializers.CharField(max_length=10)
     code = serializers.CharField(max_length=6)
 
     def validate(self, attrs):
