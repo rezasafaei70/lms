@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.password_validation import validate_password
 from .models import GradeLevel, User, StudentProfile, TeacherProfile, OTP, LoginHistory
 from utils.validators import validate_iranian_mobile, validate_iranian_national_code
+from utils.fields import S3ImageField, S3DocumentField
 import random
 from django.utils import timezone
 from datetime import timedelta
@@ -13,19 +14,56 @@ from django.conf import settings
 class UserSerializer(serializers.ModelSerializer):
     """
     Basic User Serializer
+    
+    Supports S3 upload for profile_picture:
+    - Use profile_picture_id (file_id from multipart upload)
+    - Or direct file upload
     """
     full_name = serializers.CharField(source='get_full_name', read_only=True)
     age = serializers.IntegerField(read_only=True)
+    profile_picture_url = serializers.SerializerMethodField()
+    
+    # Support S3 file reference
+    profile_picture_id = serializers.UUIDField(write_only=True, required=False)
     
     class Meta:
         model = User
         fields = [
             'id', 'mobile', 'email', 'first_name', 'last_name', 'full_name',
             'national_code', 'gender', 'birth_date', 'age', 'profile_picture',
+            'profile_picture_url', 'profile_picture_id',
             'phone', 'address', 'city', 'province', 'postal_code',
             'role', 'is_active', 'is_verified', 'created_at'
         ]
         read_only_fields = ['id', 'created_at', 'role']
+    
+    def get_profile_picture_url(self, obj):
+        if obj.profile_picture:
+            try:
+                from utils.storage import get_s3_upload_manager
+                manager = get_s3_upload_manager()
+                return manager.get_file_url(obj.profile_picture.name)
+            except Exception:
+                request = self.context.get('request')
+                if request and obj.profile_picture:
+                    return request.build_absolute_uri(obj.profile_picture.url)
+        return None
+    
+    def validate(self, attrs):
+        # Handle S3 file reference for profile picture
+        profile_picture_id = attrs.pop('profile_picture_id', None)
+        
+        if profile_picture_id:
+            from apps.core.models import UploadedFile
+            try:
+                uploaded_file = UploadedFile.objects.get(id=profile_picture_id)
+                attrs['profile_picture'] = uploaded_file.s3_key
+                uploaded_file.is_temp = False
+                uploaded_file.save()
+            except UploadedFile.DoesNotExist:
+                raise serializers.ValidationError({'profile_picture_id': 'فایل پیدا نشد'})
+        
+        return attrs
 
 class GradeLevelSerializer(serializers.ModelSerializer):
     """
@@ -38,20 +76,85 @@ class GradeLevelSerializer(serializers.ModelSerializer):
 class StudentProfileSerializer(serializers.ModelSerializer):
     """
     Student Profile Serializer
+    
+    Supports S3 upload for documents:
+    - Use id_card_image_id, birth_certificate_image_id from multipart upload
     """
     user = UserSerializer(read_only=True)
     grade_level_details = GradeLevelSerializer(source='grade_level', read_only=True)
+    
+    # S3 file URLs
+    id_card_image_url = serializers.SerializerMethodField()
+    birth_certificate_image_url = serializers.SerializerMethodField()
+    
+    # S3 file references
+    id_card_image_id = serializers.UUIDField(write_only=True, required=False)
+    birth_certificate_image_id = serializers.UUIDField(write_only=True, required=False)
+    
     class Meta:
         model = StudentProfile
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'student_number', 'registration_date']
+    
+    def _get_s3_url(self, file_field):
+        if file_field:
+            try:
+                from utils.storage import get_s3_upload_manager
+                manager = get_s3_upload_manager()
+                return manager.get_file_url(file_field.name)
+            except Exception:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(file_field.url)
+        return None
+    
+    def get_id_card_image_url(self, obj):
+        return self._get_s3_url(obj.id_card_image)
+    
+    def get_birth_certificate_image_url(self, obj):
+        return self._get_s3_url(obj.birth_certificate_image)
+    
+    def validate(self, attrs):
+        from apps.core.models import UploadedFile
+        
+        file_fields = {
+            'id_card_image_id': 'id_card_image',
+            'birth_certificate_image_id': 'birth_certificate_image',
+        }
+        
+        for id_field, target_field in file_fields.items():
+            file_id = attrs.pop(id_field, None)
+            if file_id:
+                try:
+                    uploaded_file = UploadedFile.objects.get(id=file_id)
+                    attrs[target_field] = uploaded_file.s3_key
+                    uploaded_file.is_temp = False
+                    uploaded_file.save()
+                except UploadedFile.DoesNotExist:
+                    raise serializers.ValidationError({id_field: 'فایل پیدا نشد'})
+        
+        return attrs
 
 
 class TeacherProfileSerializer(serializers.ModelSerializer):
     """
     Teacher Profile Serializer
+    
+    Supports S3 upload for documents (resume, certificates, contract_file):
+    - Use resume_id, certificates_id, contract_file_id from multipart upload
+    - Or direct file upload
     """
     user = UserSerializer(read_only=True)
+    
+    # S3 file URLs
+    resume_url = serializers.SerializerMethodField()
+    certificates_url = serializers.SerializerMethodField()
+    contract_file_url = serializers.SerializerMethodField()
+    
+    # S3 file references
+    resume_id = serializers.UUIDField(write_only=True, required=False)
+    certificates_id = serializers.UUIDField(write_only=True, required=False)
+    contract_file_id = serializers.UUIDField(write_only=True, required=False)
     
     class Meta:
         model = TeacherProfile
@@ -59,6 +162,49 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'created_at', 'employee_code', 'rating', 'total_reviews'
         ]
+    
+    def _get_s3_url(self, file_field):
+        if file_field:
+            try:
+                from utils.storage import get_s3_upload_manager
+                manager = get_s3_upload_manager()
+                return manager.get_file_url(file_field.name)
+            except Exception:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(file_field.url)
+        return None
+    
+    def get_resume_url(self, obj):
+        return self._get_s3_url(obj.resume)
+    
+    def get_certificates_url(self, obj):
+        return self._get_s3_url(obj.certificates)
+    
+    def get_contract_file_url(self, obj):
+        return self._get_s3_url(obj.contract_file)
+    
+    def validate(self, attrs):
+        from apps.core.models import UploadedFile
+        
+        file_fields = {
+            'resume_id': 'resume',
+            'certificates_id': 'certificates',
+            'contract_file_id': 'contract_file',
+        }
+        
+        for id_field, target_field in file_fields.items():
+            file_id = attrs.pop(id_field, None)
+            if file_id:
+                try:
+                    uploaded_file = UploadedFile.objects.get(id=file_id)
+                    attrs[target_field] = uploaded_file.s3_key
+                    uploaded_file.is_temp = False
+                    uploaded_file.save()
+                except UploadedFile.DoesNotExist:
+                    raise serializers.ValidationError({id_field: 'فایل پیدا نشد'})
+        
+        return attrs
 
 
 class RegisterSerializer(serializers.Serializer):

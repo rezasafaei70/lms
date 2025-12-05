@@ -32,7 +32,8 @@ THIRD_PARTY_APPS = [
     'import_export',
     'django_celery_beat',
     'debug_toolbar',
-    'drf_yasg'
+    'drf_yasg',
+    'storages',
 ]
 
 LOCAL_APPS = [
@@ -188,11 +189,22 @@ SIMPLE_JWT = {
 }
 
 # CORS Settings
-CORS_ALLOWED_ORIGINS = [
-    "*",
-    "http://185.208.175.44:8000",
-]
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-amz-date',
+    'x-amz-security-token',
+    'x-amz-content-sha256',
+]
 
 # Redis Configuration
 REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
@@ -233,12 +245,56 @@ BBB_URL = config('BBB_URL', default='')
 BBB_SECRET = config('BBB_SECRET', default='')
 
 # File Upload Settings
-MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500MB for video uploads
 ALLOWED_UPLOAD_EXTENSIONS = [
     'pdf', 'doc', 'docx', 'ppt', 'pptx',
     'xls', 'xlsx', 'jpg', 'jpeg', 'png',
-    'mp4', 'mp3', 'zip', 'rar'
+    'mp4', 'mp3', 'zip', 'rar', 'webm', 'mov'
 ]
+ALLOWED_UPLOAD_CONTENT_TYPES = [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'video/mp4',
+    'video/webm',
+    'video/quicktime',
+    'audio/mpeg',
+    'audio/mp3',
+    'application/zip',
+    'application/x-rar-compressed',
+    'application/octet-stream',
+]
+
+# AWS S3 Configuration
+AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
+AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
+AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='kanoon-academy')
+AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
+AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default=None)  # For MinIO or other S3-compatible services
+AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default=None)
+AWS_DEFAULT_ACL = 'private'
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': 'max-age=86400',
+}
+AWS_QUERYSTRING_AUTH = True
+AWS_QUERYSTRING_EXPIRE = 3600  # 1 hour
+
+# S3 Storage Settings
+USE_S3_STORAGE = config('USE_S3_STORAGE', default=False, cast=bool)
+
+if USE_S3_STORAGE:
+    # Use S3 for media files
+    DEFAULT_FILE_STORAGE = 'utils.storage.S3MediaStorage'
+    # Optionally use S3 for static files too
+    # STATICFILES_STORAGE = 'utils.storage.S3StaticStorage'
 
 # Logging
 LOGGING = {

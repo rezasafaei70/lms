@@ -7,6 +7,7 @@ from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateCla
 from apps.accounts.serializers import UserSerializer
 from apps.branches.serializers import BranchSerializer, ClassroomSerializer
 from django.core.validators import MinValueValidator, MaxValueValidator
+from utils.fields import S3ImageField, S3VideoField, S3DocumentField
 
 
 
@@ -25,6 +26,11 @@ class SubjectSerializer(serializers.ModelSerializer):
 class CourseSerializer(serializers.ModelSerializer):
     """
     Course Serializer
+    
+    Supports S3 multipart upload:
+    - thumbnail_id: برای تصویر شاخص
+    - video_intro_id: برای ویدیو معرفی
+    - certificate_template_id: برای قالب گواهینامه
     """
     prerequisites_details = serializers.SerializerMethodField()
     level_display = serializers.CharField(source='get_level_display', read_only=True)
@@ -32,11 +38,43 @@ class CourseSerializer(serializers.ModelSerializer):
     is_active = serializers.BooleanField(read_only=True)
     active_classes_count = serializers.SerializerMethodField()
     subjects_details = SubjectSerializer(source='subjects', many=True, read_only=True)
+    
+    # S3 file URLs
+    thumbnail_url = serializers.SerializerMethodField()
+    video_intro_url = serializers.SerializerMethodField()
+    certificate_template_url = serializers.SerializerMethodField()
+    
+    # S3 file references
+    thumbnail_id = serializers.UUIDField(write_only=True, required=False)
+    video_intro_id = serializers.UUIDField(write_only=True, required=False)
+    certificate_template_id = serializers.UUIDField(write_only=True, required=False)
+    
     class Meta:
         model = Course
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at', 'total_enrollments', 
                            'average_rating', 'total_reviews']
+    
+    def _get_s3_url(self, file_field):
+        if file_field:
+            try:
+                from utils.storage import get_s3_upload_manager
+                manager = get_s3_upload_manager()
+                return manager.get_file_url(file_field.name)
+            except Exception:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(file_field.url)
+        return None
+    
+    def get_thumbnail_url(self, obj):
+        return self._get_s3_url(obj.thumbnail)
+    
+    def get_video_intro_url(self, obj):
+        return self._get_s3_url(obj.video_intro)
+    
+    def get_certificate_template_url(self, obj):
+        return self._get_s3_url(obj.certificate_template)
 
     def get_prerequisites_details(self, obj):
         if obj.prerequisites.exists():
@@ -48,6 +86,28 @@ class CourseSerializer(serializers.ModelSerializer):
             status=Class.ClassStatus.SCHEDULED,
             is_registration_open=True
         ).count()
+    
+    def validate(self, attrs):
+        from apps.core.models import UploadedFile
+        
+        file_fields = {
+            'thumbnail_id': 'thumbnail',
+            'video_intro_id': 'video_intro',
+            'certificate_template_id': 'certificate_template',
+        }
+        
+        for id_field, target_field in file_fields.items():
+            file_id = attrs.pop(id_field, None)
+            if file_id:
+                try:
+                    uploaded_file = UploadedFile.objects.get(id=file_id)
+                    attrs[target_field] = uploaded_file.s3_key
+                    uploaded_file.is_temp = False
+                    uploaded_file.save()
+                except UploadedFile.DoesNotExist:
+                    raise serializers.ValidationError({id_field: 'فایل پیدا نشد'})
+        
+        return attrs
 
 
 class CourseListSerializer(serializers.ModelSerializer):

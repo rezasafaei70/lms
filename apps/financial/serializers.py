@@ -7,6 +7,7 @@ from .models import (
 )
 from apps.accounts.serializers import UserSerializer
 from apps.enrollments.serializers import AnnualRegistrationSerializer, EnrollmentListSerializer
+from utils.fields import S3DocumentField
 
 
 class InvoiceItemSerializer(serializers.ModelSerializer):
@@ -189,6 +190,9 @@ class CreateInvoiceSerializer(serializers.Serializer):
 class PaymentSerializer(serializers.ModelSerializer):
     """
     Payment Serializer
+    
+    Supports S3 upload for receipt_file:
+    - Use receipt_file_id from multipart upload
     """
     invoice_number = serializers.CharField(source='invoice.invoice_number', read_only=True)
     student_name = serializers.CharField(source='student.get_full_name', read_only=True)
@@ -198,6 +202,12 @@ class PaymentSerializer(serializers.ModelSerializer):
     )
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     
+    # S3 file URL
+    receipt_file_url = serializers.SerializerMethodField()
+    
+    # S3 file reference
+    receipt_file_id = serializers.UUIDField(write_only=True, required=False)
+    
     class Meta:
         model = Payment
         fields = '__all__'
@@ -205,6 +215,33 @@ class PaymentSerializer(serializers.ModelSerializer):
             'id', 'created_at', 'updated_at', 'payment_number',
             'payment_date', 'verified_date', 'verified_by'
         ]
+    
+    def get_receipt_file_url(self, obj):
+        if obj.receipt_file:
+            try:
+                from utils.storage import get_s3_upload_manager
+                manager = get_s3_upload_manager()
+                return manager.get_file_url(obj.receipt_file.name)
+            except Exception:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(obj.receipt_file.url)
+        return None
+    
+    def validate(self, attrs):
+        from apps.core.models import UploadedFile
+        
+        receipt_file_id = attrs.pop('receipt_file_id', None)
+        if receipt_file_id:
+            try:
+                uploaded_file = UploadedFile.objects.get(id=receipt_file_id)
+                attrs['receipt_file'] = uploaded_file.s3_key
+                uploaded_file.is_temp = False
+                uploaded_file.save()
+            except UploadedFile.DoesNotExist:
+                raise serializers.ValidationError({'receipt_file_id': 'فایل پیدا نشد'})
+        
+        return attrs
 
 
 class VerifyPaymentSerializer(serializers.Serializer):
@@ -341,6 +378,9 @@ class CreateInstallmentPlanSerializer(serializers.Serializer):
 class TransactionSerializer(serializers.ModelSerializer):
     """
     Transaction Serializer
+    
+    Supports S3 upload for receipt_file:
+    - Use receipt_file_id from multipart upload
     """
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     transaction_type_display = serializers.CharField(
@@ -356,10 +396,43 @@ class TransactionSerializer(serializers.ModelSerializer):
         read_only=True
     )
     
+    # S3 file URL
+    receipt_file_url = serializers.SerializerMethodField()
+    
+    # S3 file reference
+    receipt_file_id = serializers.UUIDField(write_only=True, required=False)
+    
     class Meta:
         model = Transaction
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at', 'transaction_number']
+    
+    def get_receipt_file_url(self, obj):
+        if obj.receipt_file:
+            try:
+                from utils.storage import get_s3_upload_manager
+                manager = get_s3_upload_manager()
+                return manager.get_file_url(obj.receipt_file.name)
+            except Exception:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(obj.receipt_file.url)
+        return None
+    
+    def validate(self, attrs):
+        from apps.core.models import UploadedFile
+        
+        receipt_file_id = attrs.pop('receipt_file_id', None)
+        if receipt_file_id:
+            try:
+                uploaded_file = UploadedFile.objects.get(id=receipt_file_id)
+                attrs['receipt_file'] = uploaded_file.s3_key
+                uploaded_file.is_temp = False
+                uploaded_file.save()
+            except UploadedFile.DoesNotExist:
+                raise serializers.ValidationError({'receipt_file_id': 'فایل پیدا نشد'})
+        
+        return attrs
 
 
 class TeacherPaymentSerializer(serializers.ModelSerializer):

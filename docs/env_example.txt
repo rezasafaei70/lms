@@ -1,0 +1,39 @@
+# Django Settings
+SECRET_KEY=your-secret-key-here
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1,185.208.175.44
+
+# Database
+DB_NAME=academy_db
+DB_USER=academy_user
+DB_PASSWORD=academy_password
+DB_HOST=localhost
+DB_PORT=5432
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
+
+# SMS (Kavenegar)
+SMS_API_KEY=your-kavenegar-api-key
+SMS_SENDER=10008663
+
+# Payment Gateway
+BANK_MERCHANT_ID=
+BANK_TERMINAL_ID=
+BANK_GATEWAY_URL=
+
+# BigBlueButton
+BBB_URL=
+BBB_SECRET=
+
+# AWS S3 Configuration (for file uploads)
+USE_S3_STORAGE=True
+AWS_ACCESS_KEY_ID=your-aws-access-key
+AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+AWS_STORAGE_BUCKET_NAME=kanoon-academy
+AWS_S3_REGION_NAME=us-east-1
+
+# For MinIO or other S3-compatible services (optional)
+# AWS_S3_ENDPOINT_URL=http://localhost:9000
+# AWS_S3_CUSTOM_DOMAIN=cdn.example.com
+

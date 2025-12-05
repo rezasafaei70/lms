@@ -5,11 +5,16 @@ from .models import (
     OnlineSession, OnlineSessionParticipant
 )
 from apps.accounts.serializers import UserSerializer
+from utils.fields import S3FileField, S3DocumentField
 
 
 class CourseMaterialSerializer(serializers.ModelSerializer):
     """
     Course Material Serializer
+    
+    Supports S3 multipart upload:
+    - Use file_id from multipart upload completion
+    - Or use direct file upload for small files
     """
     material_type_display = serializers.CharField(
         source='get_material_type_display',
@@ -22,6 +27,10 @@ class CourseMaterialSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
     file_size_mb = serializers.SerializerMethodField()
     
+    # Support S3 file reference
+    file_id = serializers.UUIDField(write_only=True, required=False)
+    s3_key = serializers.CharField(write_only=True, required=False)
+    
     class Meta:
         model = CourseMaterial
         fields = '__all__'
@@ -32,15 +41,44 @@ class CourseMaterialSerializer(serializers.ModelSerializer):
     
     def get_file_url(self, obj):
         if obj.file:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.file.url)
+            # Try to get S3 presigned URL
+            try:
+                from utils.storage import get_s3_upload_manager
+                manager = get_s3_upload_manager()
+                return manager.get_file_url(obj.file.name)
+            except Exception:
+                # Fallback to regular URL
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(obj.file.url)
         return None
     
     def get_file_size_mb(self, obj):
         if obj.file_size:
             return round(obj.file_size / (1024 * 1024), 2)
         return None
+    
+    def validate(self, attrs):
+        # Handle S3 file reference
+        file_id = attrs.pop('file_id', None)
+        s3_key = attrs.pop('s3_key', None)
+        
+        if file_id:
+            from apps.core.models import UploadedFile
+            try:
+                uploaded_file = UploadedFile.objects.get(id=file_id)
+                # Store the S3 key in file field
+                attrs['file'] = uploaded_file.s3_key
+                attrs['file_size'] = uploaded_file.file_size
+                # Mark as not temp
+                uploaded_file.is_temp = False
+                uploaded_file.save()
+            except UploadedFile.DoesNotExist:
+                raise serializers.ValidationError({'file_id': 'فایل پیدا نشد'})
+        elif s3_key:
+            attrs['file'] = s3_key
+        
+        return attrs
 
 
 class AssignmentSerializer(serializers.ModelSerializer):
@@ -84,6 +122,10 @@ class AssignmentSerializer(serializers.ModelSerializer):
 class AssignmentSubmissionSerializer(serializers.ModelSerializer):
     """
     Assignment Submission Serializer
+    
+    Supports S3 multipart upload for attachment:
+    - Use file_id from multipart upload completion
+    - Or use direct file upload for small files
     """
     student_details = UserSerializer(source='student', read_only=True)
     assignment_title = serializers.CharField(source='assignment.title', read_only=True)
@@ -92,6 +134,11 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
         source='graded_by.get_full_name',
         read_only=True
     )
+    attachment_url = serializers.SerializerMethodField()
+    
+    # Support S3 file reference
+    file_id = serializers.UUIDField(write_only=True, required=False)
+    s3_key = serializers.CharField(write_only=True, required=False)
     
     class Meta:
         model = AssignmentSubmission
@@ -101,9 +148,37 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
             'is_late', 'graded_by', 'graded_at', 'resubmission_count'
         ]
     
+    def get_attachment_url(self, obj):
+        if obj.attachment:
+            try:
+                from utils.storage import get_s3_upload_manager
+                manager = get_s3_upload_manager()
+                return manager.get_file_url(obj.attachment.name)
+            except Exception:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(obj.attachment.url)
+        return None
+    
     def validate(self, attrs):
         assignment = attrs.get('assignment')
         student = attrs.get('student', self.context.get('request').user)
+        
+        # Handle S3 file reference
+        file_id = attrs.pop('file_id', None)
+        s3_key = attrs.pop('s3_key', None)
+        
+        if file_id:
+            from apps.core.models import UploadedFile
+            try:
+                uploaded_file = UploadedFile.objects.get(id=file_id)
+                attrs['attachment'] = uploaded_file.s3_key
+                uploaded_file.is_temp = False
+                uploaded_file.save()
+            except UploadedFile.DoesNotExist:
+                raise serializers.ValidationError({'file_id': 'فایل پیدا نشد'})
+        elif s3_key:
+            attrs['attachment'] = s3_key
         
         # Check if already submitted
         if not self.instance:  # Creating new submission
