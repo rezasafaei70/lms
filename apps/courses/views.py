@@ -4,16 +4,49 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
+from django.db import models, transaction as db_transaction
 from django.db.models import Q, Count, Avg, F
+from datetime import datetime, timedelta
 
-from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Term, TeacherReview
+from .models import Course, Class, ClassSession, PrivateClassPricing, PrivateClassRequest, Subject, Term, TeacherReview
 from .serializers import (
     ApprovePrivateClassSerializer, CourseSerializer, CourseListSerializer, ClassSerializer,
-    ClassListSerializer, ClassSessionSerializer, CreateClassFromRequestSerializer, PrivateClassPricingSerializer, PrivateClassRequestListSerializer, PrivateClassRequestSerializer, TermSerializer,
+    ClassListSerializer, ClassSessionSerializer, CreateClassFromRequestSerializer, PrivateClassPricingSerializer, PrivateClassRequestListSerializer, PrivateClassRequestSerializer, SubjectSerializer, TermSerializer,
     TeacherReviewSerializer, CourseStatisticsSerializer
 )
 from utils.permissions import IsSuperAdmin, IsTeacher, IsStudent
 from utils.pagination import StandardResultsSetPagination
+
+
+class SubjectViewSet(viewsets.ModelViewSet):
+    """
+    Subject (درس) ViewSet
+    """
+    queryset = Subject.objects.filter(is_deleted=False)
+    serializer_class = SubjectSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['grade_level', 'is_active']
+    search_fields = ['title', 'code', 'description']
+    ordering_fields = ['title', 'created_at']
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsSuperAdmin()]
+        return [IsAuthenticated()]
+
+    @action(detail=False, methods=['get'], url_path='active')
+    def active_subjects(self, request):
+        """
+        Get active subjects
+        GET /api/v1/courses/subjects/active/
+        """
+        subjects = self.get_queryset().filter(is_active=True)
+        serializer = self.get_serializer(subjects, many=True)
+        return Response(serializer.data)
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -204,6 +237,40 @@ class ClassViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(teacher=user)
         
         return queryset
+
+    @action(detail=True, methods=['get'], url_path='students')
+    def get_students(self, request, pk=None):
+        """
+        Get all students enrolled in a class
+        GET /api/v1/courses/classes/{id}/students/
+        """
+        from apps.enrollments.models import Enrollment
+        from apps.accounts.serializers import UserSerializer
+        
+        class_obj = self.get_object()
+        enrollments = Enrollment.objects.filter(
+            class_obj=class_obj,
+            status__in=[
+                Enrollment.EnrollmentStatus.ACTIVE,
+                Enrollment.EnrollmentStatus.APPROVED,
+                Enrollment.EnrollmentStatus.COMPLETED
+            ]
+        ).select_related('student')
+        
+        students = []
+        for enrollment in enrollments:
+            student_data = UserSerializer(enrollment.student).data
+            # Add student_name for frontend compatibility
+            student_data['student_name'] = enrollment.student.get_full_name() or enrollment.student.mobile
+            student_data['student_number'] = enrollment.student.national_code or enrollment.student.mobile
+            student_data['enrollment_id'] = str(enrollment.id)
+            student_data['enrollment_status'] = enrollment.status
+            student_data['enrollment_date'] = enrollment.enrollment_date
+            student_data['paid_amount'] = float(enrollment.paid_amount)
+            student_data['is_paid'] = enrollment.is_paid
+            students.append(student_data)
+        
+        return Response(students)
 
     @action(detail=True, methods=['get'], url_path='sessions')
     def get_sessions(self, request, pk=None):
@@ -628,8 +695,8 @@ class PrivateClassRequestViewSet(viewsets.ModelViewSet):
         # دانش‌آموزان فقط درخواست‌های خود
         if user.role == user.UserRole.STUDENT:
             queryset = queryset.filter(
-                models.Q(primary_student=user) | 
-                models.Q(additional_students=user)
+                Q(primary_student=user) | 
+                Q(additional_students=user)
             )
         # مدیران شعبه فقط شعبه خود
         elif user.role == user.UserRole.BRANCH_MANAGER:

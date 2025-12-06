@@ -656,22 +656,234 @@ class PaymentCallbackView(APIView):
         except Payment.DoesNotExist:
             return Response({'error': 'پرداخت یافت نشد'}, status=status.HTTP_404_NOT_FOUND)
 
-        # استعلام از وب‌سرویس بانک (این بخش باید طبق مستندات بانک نوشته شود)
-        is_successful, tracking_code = verify_bank_payment(transaction_id, payment.amount)
+        # استعلام از وب‌سرویس بانک
+        from .payment_gateway import verify_sadad_payment
+        verify_result = verify_sadad_payment(transaction_id, payment.invoice)
 
-        if is_successful:
+        if verify_result.get('success'):
             with db_transaction.atomic():
                 payment.status = Payment.PaymentStatus.COMPLETED
                 payment.gateway_transaction_id = transaction_id
-                payment.gateway_reference_id = tracking_code
+                payment.gateway_reference_id = verify_result.get('reference_number')
                 payment.verified_date = timezone.now()
-                payment.save() # این save، سیگنال post_save را فعال می‌کند
+                payment.save()
 
             return Response({'message': 'پرداخت با موفقیت تایید شد'})
         else:
             payment.status = Payment.PaymentStatus.FAILED
             payment.save()
-            return Response({'error': 'پرداخت ناموفق بود'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': verify_result.get('error', 'پرداخت ناموفق بود')}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class SadadPaymentView(APIView):
+    """
+    Sadad Payment Gateway Views
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, action=None, *args, **kwargs):
+        """Handle GET requests for payment simulation and verification"""
+        if action == 'simulate':
+            return self.simulate_payment_page(request)
+        elif action == 'verify':
+            return self.verify_payment_status(request, kwargs.get('invoice_id'))
+        return Response({'error': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
+
+    def post(self, request, action=None, *args, **kwargs):
+        """Handle POST requests for initiating payments and callbacks"""
+        if action == 'initiate':
+            return self.initiate_payment(request)
+        elif action == 'callback':
+            return self.payment_callback(request)
+        elif action == 'simulate-confirm':
+            return self.simulate_confirm_payment(request)
+        return Response({'error': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
+
+    def initiate_payment(self, request):
+        """
+        Initiate a payment for an invoice
+        POST /api/v1/financial/payment/initiate/
+        """
+        from .payment_gateway import initiate_sadad_payment
+        
+        invoice_id = request.data.get('invoice_id')
+        if not invoice_id:
+            return Response({'error': 'شناسه فاکتور الزامی است'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            invoice = Invoice.objects.get(id=invoice_id)
+        except Invoice.DoesNotExist:
+            return Response({'error': 'فاکتور یافت نشد'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if already paid
+        if invoice.status == Invoice.InvoiceStatus.PAID:
+            return Response({'error': 'این فاکتور قبلاً پرداخت شده است'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Build callback URL
+        callback_url = request.build_absolute_uri('/api/v1/financial/payment/callback/')
+        
+        # Initiate payment
+        result = initiate_sadad_payment(invoice, callback_url)
+        
+        if result['success']:
+            return Response({
+                'success': True,
+                'payment_url': result['payment_url'],
+                'token': result['token'],
+                'order_id': result['order_id'],
+                'amount': int(invoice.total_amount),
+                'invoice_number': invoice.invoice_number,
+            })
+        else:
+            return Response({
+                'success': False,
+                'error': result.get('error', 'خطا در ایجاد درخواست پرداخت')
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    def simulate_payment_page(self, request):
+        """Simulate payment page for testing"""
+        token = request.query_params.get('token')
+        amount = request.query_params.get('amount')
+        invoice_id = request.query_params.get('invoice_id')
+        callback = request.query_params.get('callback')
+        
+        amount_toman = int(int(amount) / 10) if amount else 0
+        
+        html = f'''<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>درگاه پرداخت سداد - بانک ملی</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: Tahoma; background: linear-gradient(135deg, #1a237e, #0d47a1); min-height: 100vh; display: flex; flex-direction: column; }}
+        .header {{ background: #0d47a1; padding: 15px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #ffc107; color: white; }}
+        .logo {{ display: flex; align-items: center; gap: 12px; }}
+        .logo-icon {{ width: 45px; height: 45px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 22px; color: #0d47a1; }}
+        .main {{ flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }}
+        .card {{ background: white; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 420px; width: 100%; overflow: hidden; }}
+        .card-header {{ background: linear-gradient(90deg, #1565c0, #0d47a1); color: white; padding: 20px; text-align: center; }}
+        .card-body {{ padding: 25px; }}
+        .amount-box {{ background: linear-gradient(135deg, #e3f2fd, #bbdefb); border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 20px; border: 2px solid #90caf9; }}
+        .amount-value {{ font-size: 28px; font-weight: bold; color: #0d47a1; }}
+        .amount-toman {{ font-size: 13px; color: #666; margin-top: 5px; }}
+        .info-row {{ display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed #e0e0e0; font-size: 13px; }}
+        .form-group {{ margin-bottom: 12px; }}
+        .form-label {{ display: block; font-size: 12px; color: #666; margin-bottom: 5px; }}
+        .form-input {{ width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; text-align: center; direction: ltr; }}
+        .btn-group {{ display: flex; gap: 10px; margin-top: 15px; }}
+        .btn {{ flex: 1; padding: 14px; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; }}
+        .btn-pay {{ background: linear-gradient(135deg, #43a047, #2e7d32); color: white; }}
+        .btn-pay:hover {{ opacity: 0.9; }}
+        .btn-cancel {{ background: #f5f5f5; color: #666; border: 2px solid #e0e0e0; }}
+        .btn-cancel:hover {{ background: #ffebee; border-color: #ef5350; color: #d32f2f; }}
+        .test-banner {{ background: linear-gradient(90deg, #ff9800, #f57c00); color: white; padding: 8px; text-align: center; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🏦</div>
+            <div><strong>سداد - بانک ملی ایران</strong><br><small>درگاه پرداخت امن</small></div>
+        </div>
+        <div>🔒 SSL</div>
+    </div>
+    <div class="test-banner">⚠️ حالت آزمایشی - شبیه‌ساز درگاه پرداخت</div>
+    <div class="main">
+        <div class="card">
+            <div class="card-header"><h2>پرداخت امن اینترنتی</h2></div>
+            <div class="card-body">
+                <div class="amount-box">
+                    <div style="font-size:13px;color:#1565c0;margin-bottom:5px;">مبلغ قابل پرداخت</div>
+                    <div class="amount-value">{int(amount):,} ریال</div>
+                    <div class="amount-toman">معادل {amount_toman:,} تومان</div>
+                </div>
+                <div class="info-row"><span>پذیرنده:</span><span>آموزشگاه کنکور پزشکی</span></div>
+                <div class="info-row"><span>شماره سفارش:</span><span style="direction:ltr;">{str(invoice_id)[:8]}...</span></div>
+                <form method="POST" action="/api/v1/financial/payment/simulate-confirm/" style="margin-top:15px;">
+                    <input type="hidden" name="token" value="{token}">
+                    <input type="hidden" name="invoice_id" value="{invoice_id}">
+                    <div class="form-group"><label class="form-label">شماره کارت</label><input type="text" class="form-input" value="6037-9911-****-5678" readonly></div>
+                    <div style="display:flex;gap:10px;">
+                        <div class="form-group" style="flex:1;"><label class="form-label">CVV2</label><input type="text" class="form-input" value="***" readonly></div>
+                        <div class="form-group" style="flex:1;"><label class="form-label">انقضا</label><input type="text" class="form-input" value="12/28" readonly></div>
+                    </div>
+                    <div class="form-group"><label class="form-label">رمز دوم پویا</label><input type="text" class="form-input" value="******" readonly></div>
+                    <div class="btn-group">
+                        <button type="submit" name="status" value="success" class="btn btn-pay">✓ تأیید پرداخت</button>
+                        <button type="submit" name="status" value="failed" class="btn btn-cancel">✗ انصراف</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>'''
+        from django.http import HttpResponse
+        return HttpResponse(html, content_type='text/html')
+
+    def simulate_confirm_payment(self, request):
+        """Handle simulated payment confirmation"""
+        from .payment_gateway import process_sadad_callback
+        
+        token = request.data.get('token') or request.POST.get('token')
+        invoice_id = request.data.get('invoice_id') or request.POST.get('invoice_id')
+        status_value = request.data.get('status') or request.POST.get('status')
+        
+        result = process_sadad_callback(
+            token=token,
+            status=status_value,
+            invoice_id=invoice_id,
+            reference_number=f"TEST_REF_{str(invoice_id)[:8]}" if status_value == 'success' else None,
+            card_number='6037****1234' if status_value == 'success' else None
+        )
+        
+        frontend_url = '/student/payments'
+        if result['success']:
+            redirect_url = f"{frontend_url}?payment=success&reference={result.get('reference_number', '')}"
+        else:
+            redirect_url = f"{frontend_url}?payment=failed&error={result.get('error', 'خطا')}"
+        
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect(redirect_url)
+
+    def payment_callback(self, request):
+        """Handle payment callback from gateway"""
+        from .payment_gateway import process_sadad_callback
+        
+        token = request.data.get('token')
+        invoice_id = request.data.get('invoice_id') or request.data.get('OrderId')
+        status_value = 'success' if request.data.get('ResCode') == 0 else 'failed'
+        reference_number = request.data.get('RetrivalRefNo')
+        card_number = request.data.get('CardNo')
+        
+        result = process_sadad_callback(
+            token=token,
+            status=status_value,
+            invoice_id=invoice_id,
+            reference_number=reference_number,
+            card_number=card_number
+        )
+        
+        return Response(result)
+
+    def verify_payment_status(self, request, invoice_id):
+        """Verify payment status for an invoice"""
+        try:
+            invoice = Invoice.objects.get(id=invoice_id)
+        except Invoice.DoesNotExist:
+            return Response({'error': 'فاکتور یافت نشد'}, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response({
+            'invoice_id': str(invoice.id),
+            'invoice_number': invoice.invoice_number,
+            'status': invoice.status,
+            'is_paid': invoice.is_paid,
+            'total_amount': float(invoice.total_amount),
+            'paid_amount': float(invoice.paid_amount),
+            'remaining_amount': float(invoice.remaining_amount),
+        })
         
 class CreditNoteViewSet(viewsets.GenericViewSet):
     """

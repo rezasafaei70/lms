@@ -357,20 +357,25 @@ class StudentProfileViewSet(viewsets.ModelViewSet):
     """
     Student Profile ViewSet
     """
-    queryset = StudentProfile.objects.all()
+    queryset = StudentProfile.objects.select_related('user', 'grade_level').all()
     serializer_class = StudentProfileSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['education_level', 'is_active_student']
-    search_fields = ['user__first_name', 'user__last_name', 'student_number']
+    search_fields = ['user__first_name', 'user__last_name', 'user__national_code', 'user__mobile', 'student_number']
     ordering_fields = ['created_at', 'registration_date']
 
     def get_queryset(self):
         user = self.request.user
+        queryset = StudentProfile.objects.select_related('user', 'grade_level')
+        
+        # Students can only see their own profile
         if user.role == User.UserRole.STUDENT:
-            return StudentProfile.objects.filter(user=user)
-        return StudentProfile.objects.all()
+            return queryset.filter(user=user)
+        
+        # Admins and staff can see all students
+        return queryset.all()
 
     @action(detail=False, methods=['get'], url_path='my-profile')
     def my_profile(self, request):
@@ -398,7 +403,7 @@ class TeacherProfileViewSet(viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'can_teach_online']
-    search_fields = ['user__first_name', 'user__last_name', 'employee_code', 'expertise']
+    search_fields = ['user__first_name', 'user__last_name', 'user__national_code', 'user__mobile', 'employee_code', 'expertise']
     ordering_fields = ['created_at', 'rating', 'experience_years']
 
     @action(detail=False, methods=['get'], url_path='my-profile')

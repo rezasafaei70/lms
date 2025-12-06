@@ -235,10 +235,16 @@ SMS_PROVIDER = 'kavenegar'
 KAVENEGAR_API_KEY = config('SMS_API_KEY', default='')
 SMS_SENDER = config('SMS_SENDER', default='10008663')
 
-# Payment Gateway
+# Payment Gateway - Sadad (Bank Melli)
 BANK_MERCHANT_ID = config('BANK_MERCHANT_ID', default='')
 BANK_TERMINAL_ID = config('BANK_TERMINAL_ID', default='')
 BANK_GATEWAY_URL = config('BANK_GATEWAY_URL', default='')
+
+# Sadad Payment Gateway Configuration
+SADAD_TEST_MODE = config('SADAD_TEST_MODE', default=True, cast=bool)
+SADAD_TERMINAL_ID = config('SADAD_TERMINAL_ID', default='TEST001')
+SADAD_MERCHANT_ID = config('SADAD_MERCHANT_ID', default='TEST001')
+SADAD_MERCHANT_KEY = config('SADAD_MERCHANT_KEY', default='TEST_KEY_12345678')
 
 # BigBlueButton
 BBB_URL = config('BBB_URL', default='')
@@ -273,12 +279,12 @@ ALLOWED_UPLOAD_CONTENT_TYPES = [
     'application/octet-stream',
 ]
 
-# AWS S3 Configuration
-AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
-AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
-AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='kanoon-academy')
-AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='us-east-1')
-AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default=None)  # For MinIO or other S3-compatible services
+# AWS S3 Configuration (ArvanCloud)
+AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='cff19abe-c91e-47a0-aac1-30bea3f3175f')
+AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='4864116f5593dba7294eb8c45e7e77351f5081c189c95d217aaa0a59c37694d4')
+AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='lmspezeshki')
+AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='ir-thr-at1')
+AWS_S3_ENDPOINT_URL = config('AWS_S3_ENDPOINT_URL', default='https://s3.ir-thr-at1.arvanstorage.ir')
 AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default=None)
 AWS_DEFAULT_ACL = 'private'
 AWS_S3_OBJECT_PARAMETERS = {
@@ -287,8 +293,8 @@ AWS_S3_OBJECT_PARAMETERS = {
 AWS_QUERYSTRING_AUTH = True
 AWS_QUERYSTRING_EXPIRE = 3600  # 1 hour
 
-# S3 Storage Settings
-USE_S3_STORAGE = config('USE_S3_STORAGE', default=False, cast=bool)
+# S3 Storage Settings - ENABLED BY DEFAULT
+USE_S3_STORAGE = config('USE_S3_STORAGE', default=True, cast=bool)
 
 if USE_S3_STORAGE:
     # Use S3 for media files

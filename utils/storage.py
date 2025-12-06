@@ -56,18 +56,40 @@ class S3MultipartUploadManager:
         import boto3
         from botocore.config import Config
         
+        # Get S3 settings with fallbacks
+        self.bucket_name = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None) or 'lmspezeshki'
+        aws_access_key = getattr(settings, 'AWS_ACCESS_KEY_ID', None) or "cff19abe-c91e-47a0-aac1-30bea3f3175f"
+        aws_secret_key = getattr(settings, 'AWS_SECRET_ACCESS_KEY', None) or "4864116f5593dba7294eb8c45e7e77351f5081c189c95d217aaa0a59c37694d4"
+        endpoint_url = getattr(settings, 'AWS_S3_ENDPOINT_URL', None) or 'https://s3.ir-thr-at1.arvanstorage.ir'
+        region_name = getattr(settings, 'AWS_S3_REGION_NAME', None) or 'ir-thr-at1'
+        
+        if not self.bucket_name:
+            raise ValueError("AWS_STORAGE_BUCKET_NAME is not configured")
+      
+        if not aws_access_key or not aws_secret_key:
+            raise ValueError("AWS credentials are not configured")
+        
+        logger.info(f"Initializing S3 client for bucket: {self.bucket_name}, endpoint: {endpoint_url}")
+        
+        # Configure timeouts for slow connections (ArvanCloud can be slow)
+        # Note: ArvanCloud S3 in Iran can have high latency
         self.s3_client = boto3.client(
             's3',
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            endpoint_url=getattr(settings, 'AWS_S3_ENDPOINT_URL', None),
-            region_name=getattr(settings, 'AWS_S3_REGION_NAME', 'us-east-1'),
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
+            endpoint_url=endpoint_url,
+            region_name=region_name,
             config=Config(
                 signature_version='s3v4',
-                s3={'addressing_style': 'path'}
+                s3={'addressing_style': 'path'},
+                connect_timeout=60,   # 60 seconds connection timeout
+                read_timeout=300,     # 5 minutes read timeout for large files
+                retries={
+                    'max_attempts': 5,
+                    'mode': 'adaptive'
+                }
             )
         )
-        self.bucket_name = settings.AWS_STORAGE_BUCKET_NAME
     
     def generate_upload_key(self, folder: str, filename: str) -> str:
         """

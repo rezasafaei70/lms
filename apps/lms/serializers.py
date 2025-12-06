@@ -93,6 +93,11 @@ class AssignmentSerializer(serializers.ModelSerializer):
         source='created_by.get_full_name',
         read_only=True
     )
+    class_name = serializers.CharField(
+        source='class_obj.name',
+        read_only=True
+    )
+    class_details = serializers.SerializerMethodField()
     is_overdue = serializers.BooleanField(read_only=True)
     submission_count = serializers.SerializerMethodField()
     
@@ -105,6 +110,14 @@ class AssignmentSerializer(serializers.ModelSerializer):
     
     def get_submission_count(self, obj):
         return obj.submissions.count()
+    
+    def get_class_details(self, obj):
+        if obj.class_obj:
+            return {
+                'id': str(obj.class_obj.id),
+                'name': obj.class_obj.name,
+            }
+        return None
     
     def validate(self, attrs):
         # Validate due date

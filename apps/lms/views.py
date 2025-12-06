@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
 from django.utils import timezone
-from django.db.models import Q, Count, Avg
+from django.db.models import Q, Count, Avg, Exists, OuterRef, Subquery
 from django.http import FileResponse, Http404
 
 from .models import (
@@ -212,23 +212,39 @@ class AssignmentViewSet(viewsets.ModelViewSet):
         
         assignments = self.get_queryset()
         
-        # Annotate with submission status
-        from django.db.models import Exists, OuterRef
+        # Annotate with submission info
+        submissions = AssignmentSubmission.objects.filter(
+            assignment=OuterRef('pk'),
+            student=request.user
+        )
+        
         assignments = assignments.annotate(
-            has_submitted=Exists(
-                AssignmentSubmission.objects.filter(
-                    assignment=OuterRef('pk'),
-                    student=request.user
-                )
+            has_submitted=Exists(submissions),
+            submission_status=Subquery(
+                submissions.values('status')[:1]
+            ),
+            submission_score=Subquery(
+                submissions.values('score')[:1]
             )
         )
         
         serializer = self.get_serializer(assignments, many=True)
         data = serializer.data
         
-        # Add submission status to each assignment
+        # Add status based on submission for each assignment
         for i, assignment in enumerate(assignments):
+            class_obj = assignment.class_obj
+            data[i]['class_name'] = class_obj.name if class_obj else None
             data[i]['has_submitted'] = assignment.has_submitted
+            
+            # Determine status for frontend
+            if assignment.submission_status == 'graded':
+                data[i]['status'] = 'graded'
+                data[i]['score'] = float(assignment.submission_score) if assignment.submission_score else None
+            elif assignment.has_submitted:
+                data[i]['status'] = 'submitted'
+            else:
+                data[i]['status'] = 'pending'
         
         return Response(data)
 

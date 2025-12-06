@@ -54,12 +54,20 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             'id', 'created_at', 'updated_at', 'enrollment_number',
             'enrollment_date', 'approved_date', 'approved_by',
             'paid_amount', 'attendance_rate', 'total_sessions_attended',
-            'certificate_issued', 'certificate_issue_date', 'certificate_number'
+            'certificate_issued', 'certificate_issue_date', 'certificate_number',
+            'final_amount'  # final_amount is calculated in model.save()
         ]
 
     def validate(self, attrs):
+        # Skip validation for updates that don't change student/class
+        if self.instance:
+            return attrs
+            
         student = attrs.get('student', self.context.get('request').user)
         class_obj = attrs.get('class_obj')
+        
+        if not class_obj:
+            return attrs
         
         # Check if already enrolled
         if Enrollment.objects.filter(
@@ -77,29 +85,36 @@ class EnrollmentSerializer(serializers.ModelSerializer):
         if class_obj.is_full:
             raise serializers.ValidationError('این کلاس پر شده است')
         
-        # Check registration period
-        now = timezone.now()
-        if not class_obj.is_registration_open:
-            raise serializers.ValidationError('ثبت‌نام در این کلاس بسته است')
+        # Check registration period - skip for admin users
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'role') and request.user.role in ['super_admin', 'branch_manager']:
+            pass  # Skip registration period check for admins
+        else:
+            now = timezone.now()
+            if not class_obj.is_registration_open:
+                raise serializers.ValidationError('ثبت‌نام در این کلاس بسته است')
+            
+            if class_obj.registration_start and class_obj.registration_end:
+                if not (class_obj.registration_start <= now <= class_obj.registration_end):
+                    raise serializers.ValidationError('زمان ثبت‌نام در این کلاس به پایان رسیده است')
         
-        if not (class_obj.registration_start <= now <= class_obj.registration_end):
-            raise serializers.ValidationError('زمان ثبت‌نام در این کلاس به پایان رسیده است')
-        
-        # Set total_amount from class price
+        # Set total_amount from class price if not provided
         if not attrs.get('total_amount'):
-            attrs['total_amount'] = class_obj.price
+            attrs['total_amount'] = class_obj.price or 0
         
         return attrs
 
     @transaction.atomic
     def create(self, validated_data):
+        # Ensure discount_amount has default
+        if 'discount_amount' not in validated_data:
+            validated_data['discount_amount'] = 0
+            
         enrollment = super().create(validated_data)
         
         # Increment class enrollments count
         enrollment.class_obj.current_enrollments += 1
         enrollment.class_obj.save()
-        
-        # Create invoice (این قسمت بعداً با financial کامل می‌شود)
         
         return enrollment
 
