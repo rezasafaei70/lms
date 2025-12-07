@@ -222,10 +222,12 @@ class ClassListSerializer(serializers.ModelSerializer):
     """
     Simplified Class List Serializer
     """
+    # اطلاعات نمایشی
     course_name = serializers.CharField(source='course.name', read_only=True)
     course_level = serializers.CharField(source='course.get_level_display', read_only=True)
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     teacher_name = serializers.CharField(source='teacher.get_full_name', read_only=True)
+    classroom_name = serializers.SerializerMethodField()
     
     available_seats = serializers.IntegerField(read_only=True)
     is_full = serializers.BooleanField(read_only=True)
@@ -233,12 +235,19 @@ class ClassListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Class
         fields = [
-            'id', 'name', 'code', 'course_name', 'course_level',
-            'branch_name', 'teacher_name', 'class_type', 'start_date',
-            'end_date', 'start_time', 'end_time', 'capacity',
-            'current_enrollments', 'available_seats', 'is_full',
-            'price', 'status', 'is_registration_open'
+            'id', 'name', 'code', 
+            # شناسه‌های foreign key برای ویرایش
+            'course', 'branch', 'teacher', 'classroom',
+            # اطلاعات نمایشی
+            'course_name', 'course_level', 'branch_name', 'teacher_name', 'classroom_name',
+            # سایر فیلدها
+            'class_type', 'start_date', 'end_date', 'start_time', 'end_time', 
+            'schedule_days', 'capacity', 'current_enrollments', 'available_seats', 
+            'is_full', 'price', 'status', 'is_registration_open', 'description'
         ]
+    
+    def get_classroom_name(self, obj):
+        return obj.classroom.name if obj.classroom else None
 
 
 class TermSerializer(serializers.ModelSerializer):

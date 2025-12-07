@@ -158,7 +158,8 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = [
             'id', 'created_at', 'updated_at', 'submitted_at',
-            'is_late', 'graded_by', 'graded_at', 'resubmission_count'
+            'is_late', 'graded_by', 'graded_at', 'resubmission_count',
+            'student', 'enrollment'  # این فیلدها در perform_create تنظیم می‌شوند
         ]
     
     def get_attachment_url(self, obj):
@@ -175,7 +176,9 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
     
     def validate(self, attrs):
         assignment = attrs.get('assignment')
-        student = attrs.get('student', self.context.get('request').user)
+        # دریافت student از context (کاربر وارد شده)
+        request = self.context.get('request')
+        student = request.user if request else None
         
         # Handle S3 file reference
         file_id = attrs.pop('file_id', None)
@@ -194,7 +197,7 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
             attrs['attachment'] = s3_key
         
         # Check if already submitted
-        if not self.instance:  # Creating new submission
+        if not self.instance and student:  # Creating new submission
             if AssignmentSubmission.objects.filter(
                 assignment=assignment,
                 student=student
@@ -204,7 +207,7 @@ class AssignmentSubmissionSerializer(serializers.ModelSerializer):
                 )
         
         # Check if assignment is still accepting submissions
-        if not assignment.late_submission_allowed and timezone.now() > assignment.due_date:
+        if assignment and not assignment.late_submission_allowed and timezone.now() > assignment.due_date:
             raise serializers.ValidationError(
                 'مهلت ارسال تکلیف به پایان رسیده است'
             )

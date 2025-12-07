@@ -289,17 +289,27 @@ class ClassViewSet(viewsets.ModelViewSet):
         """
         Auto-generate sessions for a class
         POST /api/v1/courses/classes/{id}/generate-sessions/
+        {
+            "max_sessions": 10  // اختیاری - تعداد جلسات (اگر نباشد از تعداد جلسات دوره استفاده می‌شود)
+        }
         """
         class_obj = self.get_object()
+        
+        # دریافت حداکثر تعداد جلسات از درخواست
+        max_sessions = request.data.get('max_sessions')
+        if max_sessions:
+            try:
+                max_sessions = int(max_sessions)
+            except (ValueError, TypeError):
+                max_sessions = None
         
         # Delete existing sessions
         class_obj.sessions.all().delete()
         
         # Generate sessions based on schedule
-        from datetime import datetime, timedelta
         from apps.courses.utils import generate_class_sessions
         
-        sessions = generate_class_sessions(class_obj)
+        sessions = generate_class_sessions(class_obj, max_sessions=max_sessions)
         
         return Response({
             'message': f'{len(sessions)} جلسه با موفقیت ایجاد شد',

@@ -298,14 +298,21 @@ class AssignmentSubmission(TimeStampedModel):
         return f"{self.assignment.title} - {self.student.get_full_name()}"
 
     def save(self, *args, **kwargs):
+        from django.utils import timezone
+        
+        # برای رکوردهای جدید، submitted_at هنوز None است
+        # از زمان فعلی استفاده می‌کنیم
+        submission_time = self.submitted_at or timezone.now()
+        
         # Check if late
-        if self.submitted_at > self.assignment.due_date:
-            self.is_late = True
-            
-            # Apply penalty
-            if self.score and self.assignment.late_penalty_percent > 0:
-                penalty = (self.score * self.assignment.late_penalty_percent) / 100
-                self.score = max(0, self.score - penalty)
+        if self.assignment and self.assignment.due_date:
+            if submission_time > self.assignment.due_date:
+                self.is_late = True
+                
+                # Apply penalty
+                if self.score and self.assignment.late_penalty_percent > 0:
+                    penalty = (self.score * self.assignment.late_penalty_percent) / 100
+                    self.score = max(0, self.score - penalty)
         
         super().save(*args, **kwargs)
 

@@ -108,15 +108,20 @@ const AdminClasses = () => {
   const handleOpenModal = (cls = null) => {
     if (cls) {
       setEditingClass(cls);
-      // Get teacher User ID from teacher_details if available, otherwise use teacher
-      const teacherId = cls.teacher_details?.id || cls.teacher;
+      // استخراج ID ها - اول از فیلد مستقیم، بعد از nested objects
+      const courseId = cls.course || cls.course_details?.id || '';
+      const branchId = cls.branch || cls.branch_details?.id || '';
+      const teacherId = cls.teacher || cls.teacher_details?.id || '';
+      const classroomId = cls.classroom || cls.classroom_details?.id || '';
+      
+      console.log('Edit class data:', { cls, courseId, branchId, teacherId, classroomId });
+      
       setFormData({
         name: cls.name || '',
-        course: cls.course || '',
-        branch: cls.branch || '',
-        teacher: teacherId || '',
-        classroom: cls.classroom || '',
-        term: cls.term || '',
+        course: courseId,
+        branch: branchId,
+        teacher: teacherId,
+        classroom: classroomId,
         capacity: cls.capacity || 20,
         schedule_days: cls.schedule_days || [],
         start_time: cls.start_time || '14:00',
@@ -126,8 +131,8 @@ const AdminClasses = () => {
         status: cls.status || 'scheduled',
         description: cls.description || '',
       });
-      if (cls.branch) {
-        fetchClassrooms(cls.branch);
+      if (branchId) {
+        fetchClassrooms(branchId);
       }
     } else {
       setEditingClass(null);

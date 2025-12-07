@@ -241,10 +241,16 @@ BANK_TERMINAL_ID = config('BANK_TERMINAL_ID', default='')
 BANK_GATEWAY_URL = config('BANK_GATEWAY_URL', default='')
 
 # Sadad Payment Gateway Configuration
-SADAD_TEST_MODE = config('SADAD_TEST_MODE', default=True, cast=bool)
-SADAD_TERMINAL_ID = config('SADAD_TERMINAL_ID', default='TEST001')
-SADAD_MERCHANT_ID = config('SADAD_MERCHANT_ID', default='TEST001')
-SADAD_MERCHANT_KEY = config('SADAD_MERCHANT_KEY', default='TEST_KEY_12345678')
+SADAD_TEST_MODE = config('SADAD_TEST_MODE', default=False, cast=bool)
+SADAD_TERMINAL_ID = config('SADAD_TERMINAL_ID', default='5tlQRAWNSIZKMNO5XwJqE5Oq5yDxUD2M')
+SADAD_MERCHANT_ID = config('SADAD_MERCHANT_ID', default='000000140334793')
+SADAD_MERCHANT_KEY = config('SADAD_MERCHANT_KEY', default='24091377')
+
+# Frontend URL (برای ریدایرکت بعد از پرداخت)
+FRONTEND_URL = config('FRONTEND_URL', default='http://127.0.0.1:3000')
+
+# Backend API URL (برای ساخت URL کامل درگاه پرداخت)
+API_BASE_URL = config('API_BASE_URL', default='http://127.0.0.1:8000')
 
 # BigBlueButton
 BBB_URL = config('BBB_URL', default='')

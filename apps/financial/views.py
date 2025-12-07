@@ -675,11 +675,18 @@ class PaymentCallbackView(APIView):
             return Response({'error': verify_result.get('error', 'پرداخت ناموفق بود')}, status=status.HTTP_400_BAD_REQUEST)
 
 
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+
+@method_decorator(csrf_exempt, name='dispatch')
 class SadadPaymentView(APIView):
     """
     Sadad Payment Gateway Views
     """
-    permission_classes = [IsAuthenticated]
+    # اجازه دسترسی به همه - بررسی احراز هویت در هر متد جداگانه انجام می‌شود
+    permission_classes = [AllowAny]
+    # احراز هویت فعال باشد تا توکن JWT پردازش شود
+    # authentication_classes پیش‌فرض استفاده می‌شود
 
     def get(self, request, action=None, *args, **kwargs):
         """Handle GET requests for payment simulation and verification"""
@@ -696,6 +703,7 @@ class SadadPaymentView(APIView):
         elif action == 'callback':
             return self.payment_callback(request)
         elif action == 'simulate-confirm':
+            # این اکشن از فرم HTML فراخوانی می‌شود و نیاز به احراز هویت ندارد
             return self.simulate_confirm_payment(request)
         return Response({'error': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -704,6 +712,10 @@ class SadadPaymentView(APIView):
         Initiate a payment for an invoice
         POST /api/v1/financial/payment/initiate/
         """
+        # بررسی احراز هویت برای شروع پرداخت
+        if not request.user or not request.user.is_authenticated:
+            return Response({'error': 'برای پرداخت باید وارد شوید'}, status=status.HTTP_401_UNAUTHORIZED)
+        
         from .payment_gateway import initiate_sadad_payment
         
         invoice_id = request.data.get('invoice_id')
@@ -726,9 +738,20 @@ class SadadPaymentView(APIView):
         result = initiate_sadad_payment(invoice, callback_url)
         
         if result['success']:
+            # تبدیل URL نسبی به URL مطلق برای جلوگیری از مشکل پورت
+            payment_url = result['payment_url']
+            if payment_url.startswith('/'):
+                # استفاده از تنظیمات API_BASE_URL برای ساخت URL کامل
+                from django.conf import settings
+                api_base_url = getattr(settings, 'API_BASE_URL', None)
+                if api_base_url:
+                    payment_url = f"{api_base_url.rstrip('/')}{payment_url}"
+                else:
+                    payment_url = request.build_absolute_uri(payment_url)
+            
             return Response({
                 'success': True,
-                'payment_url': result['payment_url'],
+                'payment_url': payment_url,
                 'token': result['token'],
                 'order_id': result['order_id'],
                 'amount': int(invoice.total_amount),
@@ -742,12 +765,22 @@ class SadadPaymentView(APIView):
 
     def simulate_payment_page(self, request):
         """Simulate payment page for testing"""
-        token = request.query_params.get('token')
-        amount = request.query_params.get('amount')
-        invoice_id = request.query_params.get('invoice_id')
-        callback = request.query_params.get('callback')
+        token = request.query_params.get('token', '')
+        amount = request.query_params.get('amount', '0')
+        invoice_id = request.query_params.get('invoice_id', '')
+        callback = request.query_params.get('callback', '')
         
-        amount_toman = int(int(amount) / 10) if amount else 0
+        # تبدیل مبلغ به عدد
+        try:
+            amount_int = int(amount) if amount else 0
+            amount_toman = amount_int // 10
+        except (ValueError, TypeError):
+            amount_int = 0
+            amount_toman = 0
+        
+        # فرمت کردن مبلغ با جداکننده هزارگان
+        amount_formatted = f"{amount_int:,}"
+        amount_toman_formatted = f"{amount_toman:,}"
         
         html = f'''<!DOCTYPE html>
 <html dir="rtl" lang="fa">
@@ -796,12 +829,12 @@ class SadadPaymentView(APIView):
             <div class="card-body">
                 <div class="amount-box">
                     <div style="font-size:13px;color:#1565c0;margin-bottom:5px;">مبلغ قابل پرداخت</div>
-                    <div class="amount-value">{int(amount):,} ریال</div>
-                    <div class="amount-toman">معادل {amount_toman:,} تومان</div>
+                    <div class="amount-value">{amount_formatted} ریال</div>
+                    <div class="amount-toman">معادل {amount_toman_formatted} تومان</div>
                 </div>
                 <div class="info-row"><span>پذیرنده:</span><span>آموزشگاه کنکور پزشکی</span></div>
                 <div class="info-row"><span>شماره سفارش:</span><span style="direction:ltr;">{str(invoice_id)[:8]}...</span></div>
-                <form method="POST" action="/api/v1/financial/payment/simulate-confirm/" style="margin-top:15px;">
+                <form method="POST" action="/api/v1/financial/payment/simulate-confirm/" style="margin-top:15px;" id="paymentForm">
                     <input type="hidden" name="token" value="{token}">
                     <input type="hidden" name="invoice_id" value="{invoice_id}">
                     <div class="form-group"><label class="form-label">شماره کارت</label><input type="text" class="form-input" value="6037-9911-****-5678" readonly></div>
@@ -821,11 +854,12 @@ class SadadPaymentView(APIView):
 </body>
 </html>'''
         from django.http import HttpResponse
-        return HttpResponse(html, content_type='text/html')
+        return HttpResponse(html, content_type='text/html; charset=utf-8')
 
     def simulate_confirm_payment(self, request):
         """Handle simulated payment confirmation"""
         from .payment_gateway import process_sadad_callback
+        from django.conf import settings
         
         token = request.data.get('token') or request.POST.get('token')
         invoice_id = request.data.get('invoice_id') or request.POST.get('invoice_id')
@@ -839,11 +873,17 @@ class SadadPaymentView(APIView):
             card_number='6037****1234' if status_value == 'success' else None
         )
         
-        frontend_url = '/student/payments'
+        # استفاده از تنظیمات فرانت‌اند یا پیش‌فرض
+        frontend_base = getattr(settings, 'FRONTEND_URL', 'http://127.0.0.1:3000')
+        frontend_url = f"{frontend_base}/student/payments"
+        
         if result['success']:
             redirect_url = f"{frontend_url}?payment=success&reference={result.get('reference_number', '')}"
         else:
-            redirect_url = f"{frontend_url}?payment=failed&error={result.get('error', 'خطا')}"
+            error_msg = result.get('error', 'خطا')
+            # URL encode the error message
+            from urllib.parse import quote
+            redirect_url = f"{frontend_url}?payment=failed&error={quote(error_msg)}"
         
         from django.http import HttpResponseRedirect
         return HttpResponseRedirect(redirect_url)

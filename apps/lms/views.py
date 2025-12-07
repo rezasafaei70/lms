@@ -333,17 +333,22 @@ class AssignmentSubmissionViewSet(viewsets.ModelViewSet):
         submission.save()
         
         # Send notification
-        from apps.notifications.tasks import send_notification_task
-        from apps.notifications.models import Notification
-        
-        notification = Notification.objects.create(
-            recipient=submission.student,
-            title='نمره تکلیف',
-            message=f'تکلیف {submission.assignment.title} شما نمره‌دهی شد. نمره: {submission.score}',
-            notification_type=Notification.NotificationType.SUCCESS,
-            category=Notification.NotificationCategory.EXAM
-        )
-        send_notification_task.delay(str(notification.id))
+        try:
+            from apps.notifications.tasks import send_notification_task
+            from apps.notifications.models import Notification
+            
+            notification = Notification.objects.create(
+                recipient=submission.student,
+                title='نمره تکلیف',
+                message=f'تکلیف {submission.assignment.title} شما نمره‌دهی شد. نمره: {submission.score}',
+                notification_type=Notification.NotificationType.SUCCESS,
+                category=Notification.NotificationCategory.EXAM
+            )
+            send_notification_task.delay(str(notification.id))
+        except Exception as e:
+            # اگر Redis در دسترس نیست، نوتیفیکیشن ذخیره شده ولی ارسال نمی‌شود
+            import logging
+            logging.warning(f"Could not send notification via Celery: {e}")
         
         return Response({
             'message': 'نمره ثبت شد',

@@ -50,12 +50,16 @@ class AttendanceListSerializer(serializers.ModelSerializer):
         source='enrollment.student.id',
         read_only=True
     )
+    enrollment_id = serializers.UUIDField(
+        source='enrollment.id',
+        read_only=True
+    )
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     
     class Meta:
         model = Attendance
         fields = [
-            'id', 'student_id', 'student_name', 'status',
+            'id', 'enrollment_id', 'student_id', 'student_name', 'status',
             'status_display', 'check_in_time', 'late_minutes', 'notes'
         ]
 
