@@ -1,0 +1,12 @@
+export { default as AdminDashboard } from './Dashboard';
+export { default as AdminBranches } from './Branches';
+export { default as AdminUsers } from './Users';
+export { default as AdminSubjects } from './Subjects';
+export { default as AdminCourses } from './Courses';
+export { default as AdminClasses } from './Classes';
+export { default as AdminEnrollments } from './Enrollments';
+export { default as AdminAnnualRegistrations } from './AnnualRegistrations';
+export { default as AdminFinancial } from './Financial';
+export { default as AdminReports } from './Reports';
+export { default as AdminNotifications } from './Notifications';
+export { default as AdminCRM } from './CRM';

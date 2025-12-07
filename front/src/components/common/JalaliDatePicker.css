@@ -1,0 +1,223 @@
+.jalali-date-picker {
+  position: relative;
+  width: 100%;
+}
+
+.date-picker-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: var(--gray-700);
+}
+
+.date-picker-input-wrapper {
+  position: relative;
+}
+
+.date-picker-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  padding-left: 2.5rem;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  background: white;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.date-picker-input:hover:not(:disabled) {
+  border-color: var(--primary-400);
+}
+
+.date-picker-input:focus {
+  outline: none;
+  border-color: var(--primary-500);
+  box-shadow: 0 0 0 3px var(--primary-100);
+}
+
+.date-picker-input:disabled {
+  background: var(--gray-100);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.date-picker-input::placeholder {
+  color: var(--gray-400);
+}
+
+.date-picker-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--gray-400);
+  pointer-events: none;
+}
+
+.date-picker-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Calendar Dropdown */
+.calendar-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 100;
+  background: white;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--gray-200);
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.jalali-calendar {
+  width: 280px;
+  padding: 1rem;
+}
+
+/* Calendar Header */
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.calendar-header .month-year {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--gray-800);
+}
+
+.calendar-header .nav-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--gray-100);
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-600);
+  transition: all var(--transition);
+}
+
+.calendar-header .nav-btn:hover {
+  background: var(--primary-50);
+  color: var(--primary-600);
+}
+
+.calendar-header .nav-btn svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* Weekdays */
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.calendar-weekdays span {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--gray-500);
+  padding: 0.25rem;
+}
+
+/* Days Grid */
+.calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.day-cell {
+  aspect-ratio: 1;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--gray-700);
+  transition: all var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.day-cell:hover:not(.disabled):not(.selected) {
+  background: var(--gray-100);
+}
+
+.day-cell.empty {
+  cursor: default;
+}
+
+.day-cell.today {
+  background: var(--primary-50);
+  color: var(--primary-600);
+}
+
+.day-cell.selected {
+  background: var(--primary-600);
+  color: white;
+}
+
+.day-cell.selected:hover {
+  background: var(--primary-700);
+}
+
+.day-cell.disabled {
+  color: var(--gray-300);
+  cursor: not-allowed;
+}
+
+/* Calendar Footer */
+.calendar-footer {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--gray-100);
+  display: flex;
+  justify-content: center;
+}
+
+.today-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: var(--gray-100);
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--gray-700);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.today-btn:hover {
+  background: var(--primary-50);
+  color: var(--primary-600);
+}
+

@@ -1,0 +1,201 @@
+.select-branch-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%);
+}
+
+.select-branch-card {
+  width: 100%;
+  max-width: 500px;
+  background: white;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  padding: 2rem;
+  animation: slideUp var(--transition-slow) ease-out;
+}
+
+.select-branch-loading {
+  text-align: center;
+  padding: 3rem;
+}
+
+.select-branch-loading p {
+  margin-top: 1rem;
+  color: var(--gray-600);
+}
+
+.select-branch-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.select-branch-logo {
+  margin-bottom: 1rem;
+}
+
+.select-branch-logo svg {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto;
+}
+
+.select-branch-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--gray-800);
+  margin: 0 0 0.5rem;
+}
+
+.select-branch-header p {
+  color: var(--gray-500);
+  margin: 0;
+}
+
+/* Branch List */
+.branch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 400px;
+  overflow-y: auto;
+  margin-bottom: 1.5rem;
+}
+
+.branch-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--gray-50);
+  border: 2px solid var(--gray-100);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition);
+  text-align: right;
+  width: 100%;
+}
+
+.branch-item:hover {
+  background: var(--gray-100);
+  border-color: var(--gray-200);
+}
+
+.branch-item.selected {
+  background: var(--primary-50);
+  border-color: var(--primary-500);
+}
+
+.branch-item-image {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--gray-200);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.branch-item-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.branch-item-image svg {
+  width: 28px;
+  height: 28px;
+  color: var(--gray-400);
+}
+
+.branch-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.branch-item-info h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--gray-800);
+  margin: 0 0 0.25rem;
+}
+
+.branch-item-info span {
+  font-size: 0.8125rem;
+  color: var(--gray-500);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-item-check {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--primary-500);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: all var(--transition);
+}
+
+.branch-item.selected .branch-item-check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.branch-item-check svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Empty State */
+.select-branch-empty {
+  text-align: center;
+  padding: 2rem;
+}
+
+.select-branch-empty svg {
+  width: 64px;
+  height: 64px;
+  color: var(--gray-400);
+  margin-bottom: 1rem;
+}
+
+.select-branch-empty h2 {
+  font-size: 1.25rem;
+  color: var(--gray-700);
+  margin: 0 0 0.5rem;
+}
+
+.select-branch-empty p {
+  color: var(--gray-500);
+  margin: 0;
+}
+
+/* Footer */
+.select-branch-footer {
+  padding-top: 1rem;
+  border-top: 1px solid var(--gray-100);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
